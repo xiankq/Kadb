@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
-import 'package:pointycastle/export.dart';
 import 'package:kadb_dart/cert/adb_key_pair.dart';
+import 'package:kadb_dart/cert/cert_utils.dart';
 import 'package:kadb_dart/core/adb_message.dart';
 import 'package:kadb_dart/core/adb_protocol.dart';
 import 'package:kadb_dart/core/adb_reader.dart';
@@ -14,7 +12,7 @@ import 'package:kadb_dart/transport/transport_channel.dart' as base;
 import 'package:kadb_dart/transport/socket_transport_channel.dart';
 
 /// ADB连接类
-/// 管理ADB协议连接、认证和流操作
+/// 负责ADB协议的连接管理和流操作
 class AdbConnection {
   static const int _maxId = 0x7FFFFFFF;
 
@@ -49,6 +47,29 @@ class AdbConnection {
       throw StateError('连接已关闭');
     }
 
+    // 建立网络连接
+    await _establishConnection(host, port);
+
+    // 生成系统身份标识
+    final systemIdentity = CertUtils.generateSystemIdentity();
+
+    // 发送初始连接请求
+    await _writer.writeConnect(
+      version: AdbProtocol.version,
+      maxData: AdbProtocol.maxPayload,
+      systemIdentityString: 'host::$systemIdentity',
+    );
+
+    // 处理认证流程
+    await _handleAuthentication(systemIdentity);
+
+    if (_debug) {
+      print('✅ ADB连接成功建立');
+    }
+  }
+
+  /// 建立网络连接
+  Future<void> _establishConnection(String host, int port) async {
     // 创建Socket传输通道
     final socketChannel = SocketTransportChannel();
     await socketChannel.connect(host, port, timeout: ioTimeout);
@@ -67,257 +88,100 @@ class AdbConnection {
 
     // 创建消息队列
     _messageQueue = AdbMessageQueue(reader);
+  }
 
-    // 发送初始连接请求
-    await _writer.writeConnect(
-      version: AdbProtocol.version,
-      maxData: AdbProtocol.maxPayload,
-      systemIdentityString: 'host::${_generateSystemIdentity()}',
-    );
-
-    // 处理连接和认证流程
+  /// 处理认证流程
+  Future<void> _handleAuthentication(String systemIdentity) async {
     AdbMessage message;
+
     while (true) {
       message = await _messageQueue.next();
 
       switch (message.command) {
         case AdbProtocol.cmdStls:
-          // 处理TLS升级
-          await _writer.writeStls(message.arg0);
-
-          // 暂时不支持TLS升级，直接抛出异常
+          // 暂时不支持TLS升级
           throw UnsupportedError('TLS升级功能暂未实现');
-          break;
 
         case AdbProtocol.CMD_AUTH:
-          // 处理认证（简化认证流程，与Kotlin版本一致）
-          if (message.arg0 != AdbProtocol.authTypeToken) {
-            throw Exception('不支持的认证类型: ${message.arg0}');
-          }
-
-          // 关键修复：只对payload进行签名，与Kotlin版本保持一致
-          // Kotlin版本: val signature = keyPair.signPayload(message)
-          // 重要：使用message.payloadLength来限制payload的实际长度
-          final actualPayload = message.payload.sublist(0, message.payloadLength);
-
-          // 调试输出：显示token信息
-          if (_debug) {
-            print('调试: 收到AUTH token，长度=${message.payloadLength}');
-            final tokenHex = actualPayload.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
-            print('调试: token内容=$tokenHex');
-          }
-
-          final signature = _keyPair.signAdbMessagePayload(actualPayload);
-
-          // 调试输出：显示签名信息
-          if (_debug) {
-            print('调试: 生成签名，长度=${signature.length}');
-            final sigHex = signature.take(8).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
-            print('调试: 签名前8字节=$sigHex');
-          }
-
-          // 发送签名响应
-          await _writer.writeAuth(AdbProtocol.authTypeSignature, signature);
-
-          // 等待设备响应签名验证结果
-          message = await _messageQueue.next();
-
-          // 如果设备接受签名，应该返回CNXN消息
-          if (message.command == AdbProtocol.CMD_CNXN) {
-            // 认证成功，继续连接流程
-            break;
-          }
-
-          // 如果设备拒绝签名，会返回AUTH消息要求公钥认证
-          if (message.command == AdbProtocol.CMD_AUTH) {
-            // 发送公钥进行认证
-            final publicKey = _generateAdbPublicKey(_keyPair);
-            await _writer.writeAuth(
-              AdbProtocol.authTypeRsapublickey,
-              publicKey,
-            );
-
-            // 等待最终认证结果
-            message = await _messageQueue.next();
-
-            // 检查认证结果
-            if (message.command != AdbProtocol.CMD_CNXN) {
-              throw Exception('公钥认证失败: 期望CNXN消息，收到${message.command}');
-            }
-            break;
-          }
-
-          // 其他情况都是认证失败
-          throw Exception('认证失败: 期望CNXN或AUTH消息，收到${message.command}');
+          // 直接处理认证流程
+          await _performAuthentication(message, systemIdentity);
+          return;
 
         case AdbProtocol.CMD_CNXN:
-          // 连接成功，跳出整个循环
-          break;
+          // 直接连接成功，无需认证
+          return;
 
         default:
           throw Exception('未知的连接消息: ${message.command}');
       }
-
-      // 如果收到CNXN消息，跳出整个循环
-      if (message.command == AdbProtocol.CMD_CNXN) {
-        break;
-      }
     }
+  }
+
+  /// 执行认证流程
+  Future<void> _performAuthentication(AdbMessage authMessage, String systemIdentity) async {
+    if (authMessage.arg0 != AdbProtocol.authTypeToken) {
+      throw Exception('不支持的认证类型: ${authMessage.arg0}');
+    }
+
+    // 提取token数据
+    final tokenData = authMessage.payload.sublist(0, authMessage.payloadLength);
 
     if (_debug) {
-      print('ADB连接成功建立');
-    }
-  }
-
-  /// 生成ADB格式的公钥（修复格式问题）
-  /// [keyPair] ADB密钥对
-  List<int> _generateAdbPublicKey(AdbKeyPair keyPair) {
-    // 使用Android ADB要求的特定格式：Base64编码的Android RSA公钥 + 空格 + 用户名@主机名@软件名 + 空字符
-    final publicKeyBytes = _convertRsaPublicKeyToAdbFormat(keyPair.publicKey);
-    final base64Key = base64.encode(publicKeyBytes);
-    final deviceName = _generateSystemIdentity();
-
-    // 关键修复：使用与Kotlin版本完全一致的格式，包括多余的大括号
-    // Kotlin版本：Base64.encodeToByteArray(bytes) + " ${defaultDeviceName()}}".encodeToByteArray()
-    final fullKey = '$base64Key $deviceName}\u0000';
-
-    return utf8.encode(fullKey);
-  }
-
-  /// 将RSA公钥转换为ADB格式（与Kotlin版本一致）
-  /// [publicKey] RSA公钥
-  /// 返回ADB格式的字节数组
-  List<int> _convertRsaPublicKeyToAdbFormat(RSAPublicKey publicKey) {
-    /*
-     * ADB直接将RSAPublicKey结构体保存到文件中。
-     *
-     * typedef struct RSAPublicKey {
-     * int len; // n[]的长度，以uint32_t为单位
-     * uint32_t n0inv;  // -1 / n[0] mod 2^32
-     * uint32_t n[RSANUMWORDS]; // 模数，小端序数组
-     * uint32_t rr[RSANUMWORDS]; // R^2，小端序数组
-     * int exponent; // 3或65537
-     * } RSAPublicKey;
-     */
-
-    const keyLengthBits = 2048;
-    const keyLengthBytes = 256; // 2048/8
-    const keyLengthWords = 64; // 256/4
-
-    final r32 = BigInt.from(1) << 32;
-    final n = publicKey.modulus!;
-    final r = BigInt.from(1) << (keyLengthWords * 32);
-    var rr = r.modPow(BigInt.from(2), n);
-    final rem = n % r32;
-    final n0inv = rem.modInverse(r32);
-
-    final myN = List<int>.filled(keyLengthWords, 0);
-    final myRr = List<int>.filled(keyLengthWords, 0);
-
-    // 与Kotlin版本完全一致：在一个循环中先处理R^2，再处理模数n
-    var tempRr = rr;
-    var tempN = n;
-    for (int i = 0; i < keyLengthWords; i++) {
-      // 先处理R^2
-      final rrRes = tempRr ~/ r32;
-      final rrRemainder = tempRr % r32;
-      tempRr = rrRes;
-      myRr[i] = rrRemainder.toInt();
-
-      // 再处理模数n
-      final nRes = tempN ~/ r32;
-      final nRemainder = tempN % r32;
-      tempN = nRes;
-      myN[i] = nRemainder.toInt();
+      print('📝 收到认证token，长度: ${tokenData.length}');
+      final tokenHex = tokenData.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+      print('📝 Token内容: $tokenHex');
     }
 
-    // 构建字节缓冲区（小端序）
-    final buffer = BytesBuilder();
+    // 尝试签名认证
+    final signature = _keyPair.signAdbMessagePayload(tokenData);
 
-    // 写入长度（小端序）
-    _writeIntLe(buffer, keyLengthWords);
-
-    // 写入n0inv（小端序）
-    _writeIntLe(buffer, (-n0inv).toInt());
-
-    // 写入模数n（小端序）
-    for (int i = 0; i < keyLengthWords; i++) {
-      _writeIntLe(buffer, myN[i]);
+    if (_debug) {
+      print('🔐 生成签名，长度: ${signature.length}');
+      final sigHex = signature.take(8).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+      print('🔐 签名前8字节: $sigHex');
     }
 
-    // 写入R^2（小端序）
-    for (int i = 0; i < keyLengthWords; i++) {
-      _writeIntLe(buffer, myRr[i]);
-    }
+    // 发送签名响应
+    await _writer.writeAuth(AdbProtocol.authTypeSignature, signature);
 
-    // 写入指数（小端序）
-    _writeIntLe(buffer, publicKey.publicExponent!.toInt());
+    // 等待设备响应
+    final responseMessage = await _messageQueue.next();
 
-    return buffer.toBytes();
-  }
-
-  /// 以小端序写入32位整数到字节缓冲区
-  void _writeIntLe(BytesBuilder buffer, int value) {
-    buffer.addByte(value & 0xFF);
-    buffer.addByte((value >> 8) & 0xFF);
-    buffer.addByte((value >> 16) & 0xFF);
-    buffer.addByte((value >> 24) & 0xFF);
-  }
-
-  /// 将BigInt转换为字节数组
-  List<int> _bigIntToBytes(BigInt value) {
-    var data = value.toUnsigned(value.bitLength).toRadixString(16);
-    if (data.length % 2 != 0) {
-      data = '0$data';
-    }
-
-    final result = <int>[];
-    for (int i = 0; i < data.length; i += 2) {
-      result.add(int.parse(data.substring(i, i + 2), radix: 16));
-    }
-
-    return result;
-  }
-
-  /// 编码长度字段
-  List<int> _encodeLength(int length) {
-    if (length < 128) {
-      return [length];
-    } else {
-      final bytes = <int>[];
-      var value = length;
-      while (value > 0) {
-        bytes.insert(0, value & 0xFF);
-        value >>= 8;
+    if (responseMessage.command == AdbProtocol.CMD_CNXN) {
+      if (_debug) {
+        print('✅ 签名认证成功');
       }
-      bytes.insert(0, bytes.length | 0x80);
-      return bytes;
+      return;
     }
+
+    // 签名认证失败，尝试公钥认证
+    if (_debug) {
+      print('🔑 签名认证失败，尝试公钥认证...');
+    }
+
+    final publicKeyData = CertUtils.generateAuthFormatPublicKey(_keyPair, systemIdentity);
+
+    if (_debug) {
+      print('📤 发送公钥认证，长度: ${publicKeyData.length}');
+    }
+
+    // 发送公钥认证请求
+    await _writer.writeAuth(AdbProtocol.authTypeRsapublickey, publicKeyData);
+
+    // 等待最终认证结果
+    final finalMessage = await _messageQueue.next();
+
+    if (finalMessage.command == AdbProtocol.CMD_CNXN) {
+      if (_debug) {
+        print('✅ 公钥认证成功');
+      }
+      return;
+    }
+
+    throw Exception('认证失败: 期望CNXN消息，收到命令: 0x${finalMessage.command.toRadixString(16)}');
   }
 
-  /// 生成系统标识字符串（与Kotlin版本完全一致）
-  /// 关键修复：确保每次连接使用相同的系统标识，这对重连认证至关重要
-  /// Kotlin版本格式：$userName@$hostName@$software
-  String _generateSystemIdentity() {
-    // 尝试获取一致的用户名和主机名
-    final userName = Platform.environment['USER'] ??
-        Platform.environment['USERNAME'] ??
-        Platform.environment['LOGNAME'] ??
-        'user';
-    final hostName = Platform.environment['COMPUTERNAME'] ??
-        Platform.environment['HOSTNAME'] ??
-        Platform.environment['HOST'] ??
-        'localhost';
-
-    // 确保使用一致的标识符格式，避免特殊字符
-    final sanitizedUserName = userName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-    final sanitizedHostName = hostName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-
-    // 关键修复：添加软件标识符，与Kotlin版本保持一致
-    // Kotlin版本："$userName@$hostName@$software"
-    return '$sanitizedUserName@$sanitizedHostName@Kadb';
-  }
-
+  
   /// 打开ADB流
   /// [destination] 目标服务
   Future<AdbStream> open(String destination) async {

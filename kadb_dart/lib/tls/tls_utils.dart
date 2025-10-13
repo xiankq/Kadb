@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:kadb_dart/cert/adb_key_pair.dart';
 import 'package:kadb_dart/cert/android_pubkey.dart';
+import 'package:kadb_dart/cert/cert_utils.dart';
 
 /// TLS工具类
 class TlsUtils {
@@ -16,7 +17,7 @@ class TlsUtils {
     final certificateBytes = AndroidPubkey.encode(keyPair.publicKey);
     
     // 将私钥编码为PEM格式
-    final privateKeyPem = keyPair.toPrivateKeyPem();
+    final privateKeyPem = CertUtils.toPrivateKeyPem(keyPair);
     
     // 将证书和私钥添加到安全上下文
     context.useCertificateChainBytes(certificateBytes);

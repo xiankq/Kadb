@@ -21,7 +21,6 @@ export 'core/adb_message_queue.dart';
 // 证书和密钥管理
 export 'cert/adb_key_pair.dart';
 export 'cert/cert_utils.dart';
-export 'cert/key_pair_storage.dart';
 
 // 传输通道
 export 'transport/transport_channel.dart';
@@ -39,6 +38,7 @@ export 'pair/pairing_connection_ctx.dart';
 
 import 'core/adb_connection.dart';
 import 'cert/adb_key_pair.dart';
+import 'cert/cert_utils.dart';
 import 'stream/adb_shell_stream.dart';
 import 'stream/adb_sync_stream.dart';
 import 'forwarding/tcp_forwarder.dart';
@@ -60,7 +60,7 @@ class KadbDart {
     int ioTimeoutMs = 30000,
     bool debug = false,
   }) async {
-    final actualKeyPair = keyPair ?? await AdbKeyPair.generate();
+    final actualKeyPair = keyPair ?? await CertUtils.loadKeyPair();
     final connection = AdbConnection(
       keyPair: actualKeyPair,
       ioTimeout: Duration(milliseconds: ioTimeoutMs),

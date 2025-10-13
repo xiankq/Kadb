@@ -1,16 +1,19 @@
-/// ADB密钥对类，用于管理RSA密钥对
-/// 基于Kotlin原项目完整实现，使用PointyCastle加密库
+/// ADB密钥对类
+/// 专注于核心的密钥操作：生成、签名、验证
 library;
 
-import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:pointycastle/export.dart';
-import 'package:asn1lib/asn1lib.dart' as asn1;
 import 'package:kadb_dart/core/adb_message.dart';
 import 'package:kadb_dart/cert/android_pubkey.dart';
 
 /// ADB密钥对类
+///
+/// 职责：
+/// - 密钥对的生成
+/// - 数据签名和验证
+/// - 密钥对的内部状态管理
 class AdbKeyPair {
   final RSAPrivateKey _privateKey;
   final RSAPublicKey _publicKey;
@@ -23,16 +26,6 @@ class AdbKeyPair {
 
   /// 获取公钥
   RSAPublicKey get publicKey => _publicKey;
-
-  /// 获取证书字节数据
-  Uint8List get certificateBytes {
-    return AndroidPubkey.encode(_publicKey);
-  }
-
-  /// 获取公钥字节数据
-  Uint8List get publicKeyBytes {
-    return AndroidPubkey.encode(_publicKey);
-  }
 
   /// 生成新的RSA密钥对
   static Future<AdbKeyPair> generate() async {
@@ -64,45 +57,7 @@ class AdbKeyPair {
     return AdbKeyPair(privateKey, publicKey);
   }
 
-  /// 从PEM格式加载私钥
-  static Future<AdbKeyPair> fromPrivateKeyPem(String pem) async {
-    final privateKey = _parsePrivateKeyPem(pem);
-    final publicKey = _extractPublicKeyFromPrivate(privateKey);
-    return AdbKeyPair(privateKey, publicKey);
-  }
-
-  /// 将私钥导出为PEM格式
-  String toPrivateKeyPem() {
-    return _encodePrivateKeyPem(_privateKey);
-  }
-
-  /// 将公钥导出为OpenSSH格式
-  String toPublicKeySsh() {
-    final keyType = 'ssh-rsa';
-    final exponentBytes = _encodeBigInt(_publicKey.exponent ?? BigInt.zero);
-    final modulusBytes = _encodeBigInt(_publicKey.modulus ?? BigInt.zero);
-
-    final publicKeyBytes = Uint8List(
-      4 + keyType.length + 4 + exponentBytes.length + 4 + modulusBytes.length,
-    );
-
-    var offset = 0;
-
-    // 写入key type
-    _writeLengthPrefixed(publicKeyBytes, offset, utf8.encode(keyType));
-    offset += 4 + keyType.length;
-
-    // 写入exponent
-    _writeLengthPrefixed(publicKeyBytes, offset, exponentBytes);
-    offset += 4 + exponentBytes.length;
-
-    // 写入modulus
-    _writeLengthPrefixed(publicKeyBytes, offset, modulusBytes);
-
-    final base64Key = base64.encode(publicKeyBytes);
-    return '$keyType $base64Key';
-  }
-
+  
   /// 使用私钥对ADB消息payload进行签名（与Kotlin版本的signPayload方法完全一致）
   /// 这个方法专门用于ADB认证流程中的token签名
   /// [payload] 要签名的负载数据（List<int>类型，在方法内部会转换为Uint8List）
@@ -224,202 +179,7 @@ class AdbKeyPair {
     }
   }
 
-  /// 比较字节数组
-  bool _compareByteArrays(Uint8List a, Uint8List b) {
-    if (a.length != b.length) return false;
-    for (int i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
-
-  /// 解析PEM格式的私钥
-  static RSAPrivateKey _parsePrivateKeyPem(String pem) {
-    final lines = pem.split('\n');
-    var base64Content = '';
-    var inKey = false;
-
-    for (final line in lines) {
-      if (line.contains('-----BEGIN PRIVATE KEY-----')) {
-        inKey = true;
-        continue;
-      }
-      if (line.contains('-----END PRIVATE KEY-----')) {
-        break;
-      }
-      if (inKey) {
-        base64Content += line.trim();
-      }
-    }
-
-    final keyBytes = base64.decode(base64Content);
-    return _parsePrivateKeyDer(keyBytes);
-  }
-
-  /// 解析DER格式的私钥
-  static RSAPrivateKey _parsePrivateKeyDer(Uint8List derBytes) {
-    // 使用ASN.1解析器解析PKCS#8格式的私钥
-    final asn1Parser = asn1.ASN1Parser(derBytes);
-    final sequence = asn1Parser.nextObject() as asn1.ASN1Sequence;
-
-    // 第一个元素是版本
-    final version = sequence.elements[0] as asn1.ASN1Integer;
-    if (version.valueAsBigInteger != BigInt.zero) {
-      throw ArgumentError('不支持的私钥版本');
-    }
-
-    // 第二个元素是算法标识符
-    final algorithmIdentifier = sequence.elements[1] as asn1.ASN1Sequence;
-    final algorithmOid =
-        algorithmIdentifier.elements[0] as asn1.ASN1ObjectIdentifier;
-
-    if (algorithmOid.toString() != 'ObjectIdentifier(1.2.840.113549.1.1.1)') {
-      throw ArgumentError('不支持的算法: ${algorithmOid.toString()}');
-    }
-
-    // 第三个元素是私钥数据
-    final privateKeyData = sequence.elements[2] as asn1.ASN1OctetString;
-    final privateKeyParser = asn1.ASN1Parser(privateKeyData.valueBytes());
-    final privateKeySequence =
-        privateKeyParser.nextObject() as asn1.ASN1Sequence;
-
-    // 解析RSA私钥参数 - 检查私钥序列结构
-    print('调试: 私钥序列元素数量=${privateKeySequence.elements.length}');
-    for (var i = 0; i < privateKeySequence.elements.length; i++) {
-      final element = privateKeySequence.elements[i];
-      print('调试: 私钥序列[$i]: ${element.runtimeType}');
-    }
-
-    // 标准的RSA私钥序列结构: [version, modulus, publicExponent, privateExponent, prime1, prime2, ...]
-    final modulus =
-        (privateKeySequence.elements[1] as asn1.ASN1Integer).valueAsBigInteger;
-    final publicExponent =
-        (privateKeySequence.elements[2] as asn1.ASN1Integer).valueAsBigInteger;
-    final privateExponent =
-        (privateKeySequence.elements[3] as asn1.ASN1Integer).valueAsBigInteger;
-    final prime1 =
-        (privateKeySequence.elements[4] as asn1.ASN1Integer).valueAsBigInteger;
-    final prime2 =
-        (privateKeySequence.elements[5] as asn1.ASN1Integer).valueAsBigInteger;
-
-    // 关键修复：直接使用解析的模数，不进行严格的模数验证
-    // 这样可以避免"modulus inconsistent with RSA p and q"错误
-    // 与Kotlin版本的实现保持一致，它使用Java标准库的PKCS8EncodedKeySpec，不进行严格验证
-    print('调试: 使用解析的模数，跳过严格的模数验证');
-
-    // 直接使用解析的参数构造私钥
-    return _SimpleRSAPrivateKey(
-      modulus,
-      publicExponent,
-      privateExponent,
-      prime1,
-      prime2,
-    );
-  }
-
-  /// 从私钥提取公钥
-  static RSAPublicKey _extractPublicKeyFromPrivate(RSAPrivateKey privateKey) {
-    return RSAPublicKey(
-      privateKey.modulus ?? BigInt.zero,
-      privateKey.exponent ?? BigInt.from(65537),
-    );
-  }
-
-  /// 编码私钥为PEM格式
-  static String _encodePrivateKeyPem(RSAPrivateKey privateKey) {
-    final derBytes = _encodePrivateKeyDer(privateKey);
-    final base64Content = base64.encode(derBytes);
-    final pem = StringBuffer();
-
-    pem.writeln('-----BEGIN PRIVATE KEY-----');
-    for (var i = 0; i < base64Content.length; i += 64) {
-      final end = i + 64;
-      if (end > base64Content.length) {
-        pem.writeln(base64Content.substring(i));
-      } else {
-        pem.writeln(base64Content.substring(i, end));
-      }
-    }
-    pem.writeln('-----END PRIVATE KEY-----');
-
-    return pem.toString();
-  }
-
-  /// 编码私钥为DER格式
-  static Uint8List _encodePrivateKeyDer(RSAPrivateKey privateKey) {
-    final sequence = asn1.ASN1Sequence();
-
-    // 版本
-    sequence.add(asn1.ASN1Integer(BigInt.zero));
-
-    // 算法标识符
-    final algorithmSequence = asn1.ASN1Sequence();
-    algorithmSequence.add(
-      asn1.ASN1ObjectIdentifier.fromComponentString('1.2.840.113549.1.1.1'),
-    ); // RSA OID
-    algorithmSequence.add(asn1.ASN1Null());
-    sequence.add(algorithmSequence);
-
-    // 私钥数据 - 关键修复：确保编码和解析使用完全相同的模数
-    final privateKeySequence = asn1.ASN1Sequence();
-    privateKeySequence.add(asn1.ASN1Integer(BigInt.zero)); // 版本
-
-    // 关键修复：直接使用私钥的模数，而不是重新计算
-    // 这样可以确保编码和解析时使用完全相同的模数值
-    privateKeySequence.add(asn1.ASN1Integer(privateKey.modulus ?? BigInt.zero));
-
-    privateKeySequence.add(
-      asn1.ASN1Integer(privateKey.exponent ?? BigInt.from(65537)),
-    );
-    privateKeySequence.add(
-      asn1.ASN1Integer(privateKey.privateExponent ?? BigInt.one),
-    );
-    privateKeySequence.add(asn1.ASN1Integer(privateKey.p ?? BigInt.one));
-    privateKeySequence.add(asn1.ASN1Integer(privateKey.q ?? BigInt.one));
-    privateKeySequence.add(asn1.ASN1Integer(BigInt.one));
-    privateKeySequence.add(asn1.ASN1Integer(BigInt.one));
-    privateKeySequence.add(asn1.ASN1Integer(BigInt.one));
-
-    final privateKeyOctet = asn1.ASN1OctetString(
-      privateKeySequence.encodedBytes,
-    );
-    sequence.add(privateKeyOctet);
-
-    return sequence.encodedBytes;
-  }
-
-  /// 将大整数编码为字节数组
-  Uint8List _encodeBigInt(BigInt value) {
-    var hex = value.toRadixString(16);
-    if (hex.length % 2 != 0) {
-      hex = '0$hex';
-    }
-
-    final bytes = <int>[];
-    for (var i = 0; i < hex.length; i += 2) {
-      bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
-    }
-
-    // 确保最高位不为0
-    if (bytes.isNotEmpty && bytes[0] >= 0x80) {
-      bytes.insert(0, 0);
-    }
-
-    return Uint8List.fromList(bytes);
-  }
-
-  /// 写入长度前缀的数据
-  void _writeLengthPrefixed(Uint8List buffer, int offset, Uint8List data) {
-    buffer[offset] = (data.length >> 24) & 0xFF;
-    buffer[offset + 1] = (data.length >> 16) & 0xFF;
-    buffer[offset + 2] = (data.length >> 8) & 0xFF;
-    buffer[offset + 3] = data.length & 0xFF;
-
-    for (var i = 0; i < data.length; i++) {
-      buffer[offset + 4 + i] = data[i];
-    }
-  }
-
+  
   /// 将字节数组转换为大整数
   BigInt _bytesToBigInt(Uint8List bytes) {
     var result = BigInt.zero;
@@ -455,56 +215,3 @@ class AdbKeyPair {
   }
 }
 
-// 简单的RSA私钥实现，用于绕过PointyCastle的严格验证
-class _SimpleRSAPrivateKey implements RSAPrivateKey {
-  @override
-  final BigInt modulus;
-  @override
-  final BigInt publicExponent;
-  @override
-  final BigInt privateExponent;
-  @override
-  final BigInt p;
-  @override
-  final BigInt q;
-
-  _SimpleRSAPrivateKey(
-    this.modulus,
-    this.publicExponent,
-    this.privateExponent,
-    this.p,
-    this.q,
-  );
-
-  @override
-  BigInt get exponent => privateExponent;
-
-  @override
-  BigInt get n => modulus;
-
-  @override
-  BigInt get d => privateExponent;
-
-  @override
-  BigInt get pubExponent => publicExponent;
-
-  @override
-  BigInt get privateExponentFactorP => privateExponent % (p - BigInt.one);
-
-  @override
-  BigInt get privateExponentFactorQ => privateExponent % (q - BigInt.one);
-
-  @override
-  BigInt get qInv => q.modInverse(p);
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is RSAPrivateKey &&
-        other.modulus == modulus &&
-        other.exponent == exponent;
-  }
-
-  @override
-  int get hashCode => modulus.hashCode ^ exponent.hashCode;
-}

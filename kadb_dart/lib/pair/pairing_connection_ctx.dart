@@ -203,7 +203,7 @@ class PairingConnectionCtx {
     // 加密对等方信息
     final peerInfo = PeerInfo(
       PeerInfo.adbRsaPubKey,
-      CertUtils.encodeWithName(_keyPair.publicKey, _deviceName),
+      CertUtils.encodeWithName(_keyPair, _deviceName),
     );
     
     final buffer = ByteData(PeerInfo.maxPeerInfoSize);

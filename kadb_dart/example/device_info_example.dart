@@ -12,7 +12,7 @@ void main() async {
   print('正在连接到 $host:$port...');
 
   try {
-    // 加载或生成密钥对
+    // 使用简化的CertUtils加载或生成密钥对
     final keyPair = await CertUtils.loadKeyPair();
 
     // 连接到ADB服务器（使用密钥对进行认证）
