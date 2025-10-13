@@ -44,7 +44,10 @@ class CertUtils {
     
     // 保存到文件
     privateKeyFileObj.writeAsStringSync(keyPair.toPrivateKeyPem());
-    certificateFileObj.writeAsStringSync(keyPair.toPublicKeySsh());
+
+    // 保存ADB格式的公钥（与真实ADB一致）
+    final adbPublicKeyBytes = _generateAdbPublicKeyBytes(keyPair);
+    certificateFileObj.writeAsBytesSync(adbPublicKeyBytes);
     
     print('生成新的密钥对并保存到文件缓存');
     return keyPair;
@@ -65,5 +68,47 @@ class CertUtils {
     result.setRange(publicKeyPem.length, result.length, nameBytes);
     
     return result;
+  }
+
+  /// 生成完整的ADB格式公钥（与真实ADB一致）
+  /// [keyPair] ADB密钥对
+  /// 返回完整的ADB格式公钥字节数组
+  static Uint8List _generateAdbPublicKeyBytes(AdbKeyPair keyPair) {
+    // 1. 获取Android格式的公钥数据
+    final androidPublicKeyBytes = keyPair.certificateBytes;
+
+    // 2. Base64编码Android公钥
+    final base64Key = base64.encode(androidPublicKeyBytes);
+
+    // 3. 获取设备标识符（与真实ADB一致）
+    final deviceName = _getRealDeviceName();
+
+    // 4. 组合完整的ADB公钥格式
+    // 格式：Base64公钥 + 空格 + 设备标识符
+    final fullKey = '$base64Key $deviceName';
+
+    return utf8.encode(fullKey);
+  }
+
+  /// 获取真实的设备标识符（与真实ADB一致）
+  /// 返回格式：用户名@主机名
+  static String _getRealDeviceName() {
+    final userName = Platform.environment['USER'] ??
+        Platform.environment['USERNAME'] ??
+        Platform.environment['LOGNAME'] ??
+        'root';
+
+    final hostName = Platform.environment['COMPUTERNAME'] ??
+        Platform.environment['HOSTNAME'] ??
+        Platform.environment['HOST'] ??
+        'localhost';
+
+    return '$userName@$hostName';
+  }
+
+  /// 公共测试方法：生成ADB格式公钥
+  /// 仅用于测试目的
+  static Uint8List generateAdbPublicKeyBytesForTest(AdbKeyPair keyPair) {
+    return _generateAdbPublicKeyBytes(keyPair);
   }
 }
