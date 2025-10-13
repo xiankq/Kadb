@@ -90,45 +90,65 @@ class AdbConnection {
           break;
 
         case AdbProtocol.CMD_AUTH:
-          // 处理认证（与Kotlin版本完全一致）
+          // 处理认证（简化认证流程，与Kotlin版本一致）
           if (message.arg0 != AdbProtocol.authTypeToken) {
             throw Exception('不支持的认证类型: ${message.arg0}');
           }
 
-          // 签名负载（与Kotlin版本一致）
-          final signature = _keyPair.signAdbMessage(
-            AdbMessage(
-              command: message.command,
-              arg0: message.arg0,
-              arg1: message.arg1,
-              payloadLength: message.payloadLength,
-              checksum: 0, // 认证消息不需要校验和
-              magic: AdbProtocol.ADB_HEADER_LENGTH,
-              payload: Uint8List.fromList(message.payload),
-            ),
-          );
+          // 关键修复：只对payload进行签名，与Kotlin版本保持一致
+          // Kotlin版本: val signature = keyPair.signPayload(message)
+          // 重要：使用message.payloadLength来限制payload的实际长度
+          final actualPayload = message.payload.sublist(0, message.payloadLength);
+
+          // 调试输出：显示token信息
+          if (_debug) {
+            print('调试: 收到AUTH token，长度=${message.payloadLength}');
+            final tokenHex = actualPayload.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+            print('调试: token内容=$tokenHex');
+          }
+
+          final signature = _keyPair.signAdbMessagePayload(actualPayload);
+
+          // 调试输出：显示签名信息
+          if (_debug) {
+            print('调试: 生成签名，长度=${signature.length}');
+            final sigHex = signature.take(8).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+            print('调试: 签名前8字节=$sigHex');
+          }
+
+          // 发送签名响应
           await _writer.writeAuth(AdbProtocol.authTypeSignature, signature);
 
-          // 读取下一条消息（与Kotlin版本一致）
+          // 等待设备响应签名验证结果
           message = await _messageQueue.next();
 
-          // 如果还是AUTH消息，发送公钥（与Kotlin版本一致）
+          // 如果设备接受签名，应该返回CNXN消息
+          if (message.command == AdbProtocol.CMD_CNXN) {
+            // 认证成功，继续连接流程
+            break;
+          }
+
+          // 如果设备拒绝签名，会返回AUTH消息要求公钥认证
           if (message.command == AdbProtocol.CMD_AUTH) {
+            // 发送公钥进行认证
             final publicKey = _generateAdbPublicKey(_keyPair);
             await _writer.writeAuth(
               AdbProtocol.authTypeRsapublickey,
               publicKey,
             );
 
-            // 读取最终认证结果（与Kotlin版本一致）
+            // 等待最终认证结果
             message = await _messageQueue.next();
+
+            // 检查认证结果
+            if (message.command != AdbProtocol.CMD_CNXN) {
+              throw Exception('公钥认证失败: 期望CNXN消息，收到${message.command}');
+            }
+            break;
           }
 
-          // 检查是否是CNXN连接确认（与Kotlin版本一致）
-          if (message.command != AdbProtocol.CMD_CNXN) {
-            throw Exception('认证失败: 期望CNXN消息，收到${message.command}');
-          }
-          break;
+          // 其他情况都是认证失败
+          throw Exception('认证失败: 期望CNXN或AUTH消息，收到${message.command}');
 
         case AdbProtocol.CMD_CNXN:
           // 连接成功，跳出整个循环
@@ -149,16 +169,17 @@ class AdbConnection {
     }
   }
 
-  /// 生成ADB格式的公钥（与Kotlin版本一致）
+  /// 生成ADB格式的公钥（修复格式问题）
   /// [keyPair] ADB密钥对
   List<int> _generateAdbPublicKey(AdbKeyPair keyPair) {
-    // 使用与Kotlin版本一致的Android RSA公钥格式转换
+    // 使用Android ADB要求的特定格式：Base64编码的Android RSA公钥 + 空格 + 用户名@主机名@软件名 + 空字符
     final publicKeyBytes = _convertRsaPublicKeyToAdbFormat(keyPair.publicKey);
-
-    // 转换为Base64编码，并添加设备名称后缀（与Kotlin版本完全一致）
     final base64Key = base64.encode(publicKeyBytes);
     final deviceName = _generateSystemIdentity();
-    final fullKey = '$base64Key $deviceName'; // 注意：空格和两个右花括号，与Kotlin版本完全一致
+
+    // 关键修复：使用与Kotlin版本完全一致的格式，包括多余的大括号
+    // Kotlin版本：Base64.encodeToByteArray(bytes) + " ${defaultDeviceName()}}".encodeToByteArray()
+    final fullKey = '$base64Key $deviceName}\u0000';
 
     return utf8.encode(fullKey);
   }
@@ -275,16 +296,26 @@ class AdbConnection {
   }
 
   /// 生成系统标识字符串（与Kotlin版本完全一致）
+  /// 关键修复：确保每次连接使用相同的系统标识，这对重连认证至关重要
+  /// Kotlin版本格式：$userName@$hostName@$software
   String _generateSystemIdentity() {
-    final userName =
-        Platform.environment['USER'] ??
+    // 尝试获取一致的用户名和主机名
+    final userName = Platform.environment['USER'] ??
         Platform.environment['USERNAME'] ??
-        'unknown';
-    final hostName =
-        Platform.environment['COMPUTERNAME'] ??
+        Platform.environment['LOGNAME'] ??
+        'user';
+    final hostName = Platform.environment['COMPUTERNAME'] ??
         Platform.environment['HOSTNAME'] ??
-        'unknown';
-    return '$userName@$hostName';
+        Platform.environment['HOST'] ??
+        'localhost';
+
+    // 确保使用一致的标识符格式，避免特殊字符
+    final sanitizedUserName = userName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    final sanitizedHostName = hostName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+
+    // 关键修复：添加软件标识符，与Kotlin版本保持一致
+    // Kotlin版本："$userName@$hostName@$software"
+    return '$sanitizedUserName@$sanitizedHostName@Kadb';
   }
 
   /// 打开ADB流

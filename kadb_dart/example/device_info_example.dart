@@ -45,9 +45,18 @@ Future<void> _getDeviceModel(AdbConnection connection) async {
       'ro.product.model',
     ]);
 
-    // 监听标准错误
+    String deviceModel = '';
+    bool hasError = false;
+
+    // 监听标准输出（修复后应该能正确获取设备型号）
+    shellStream.stdout.listen((data) {
+      deviceModel = data.trim();
+    });
+
+    // 监听标准错误（应该为空）
     shellStream.stderr.listen((data) {
       print('❌ Shell错误: $data');
+      hasError = true;
     });
 
     // 监听退出码
@@ -55,15 +64,22 @@ Future<void> _getDeviceModel(AdbConnection connection) async {
       print('🔢 Shell退出码: $code');
     });
 
-    // 等待命令执行完成（正确等待输出）
-    final output = await shellStream.stdout.first;
-    final deviceModel = output.trim();
-    print('📱 设备型号: $deviceModel');
+    // 等待输出完成
+    await for (final _ in shellStream.stdout) {
+      break;
+    }
 
     // 关闭Shell流
     await shellStream.close();
 
-    print('✅ 设备型号获取完成');
+    if (deviceModel.isNotEmpty && !hasError) {
+      print('📱 设备型号: $deviceModel');
+      print('✅ 设备型号获取完成');
+    } else if (hasError) {
+      print('❌ 设备信息被错误识别为stderr输出');
+    } else {
+      print('⚠️ 未收到设备型号信息');
+    }
   } catch (e) {
     print('❌ 获取设备型号失败: $e');
   }

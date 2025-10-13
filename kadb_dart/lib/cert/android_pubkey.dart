@@ -2,7 +2,6 @@
 /// 基于Kotlin原项目完整实现Android RSA公钥格式
 library;
 
-
 import 'dart:typed_data';
 import 'package:pointycastle/asymmetric/api.dart';
 
@@ -10,18 +9,35 @@ import 'package:pointycastle/asymmetric/api.dart';
 class AndroidPubkey {
   /// RSA模数大小（字节）
   static const int androidPubkeyModulusSize = 2048 ~/ 8;
-  
-  /// 编码后的RSA密钥大小
-  static const int androidPubkeyEncodedSize = 3 * 4 + 2 * androidPubkeyModulusSize;
-  
-  /// RSA模数大小（字）
-  static const int androidPubkeyModulusSizeWords = androidPubkeyModulusSize ~/ 4;
 
-  /// Android公钥签名填充（与Kotlin版本完全一致，218个0xff）
+  /// 编码后的RSA密钥大小
+  static const int androidPubkeyEncodedSize =
+      3 * 4 + 2 * androidPubkeyModulusSize;
+
+  /// RSA模数大小（字）
+  static const int androidPubkeyModulusSizeWords =
+      androidPubkeyModulusSize ~/ 4;
+
+  /// Android公钥签名填充（与Kotlin版本完全一致，236字节，包含218个0xff）
   static final Uint8List signaturePadding = Uint8List.fromList([
-    0x00, 0x01, 
-    ...List.filled(218, 0xff),  // 218个0xff，加上开头2个字节，总共220个元素
-    0x00, 0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14
+    0x00, 0x01,
+    ...List.filled(218, 0xff), // 218个0xff
+    0x00,
+    0x30,
+    0x21,
+    0x30,
+    0x09,
+    0x06,
+    0x05,
+    0x2b,
+    0x0e,
+    0x03,
+    0x02,
+    0x1a,
+    0x05,
+    0x00,
+    0x04,
+    0x14,
   ]);
 
   /// 将标准RSAPublicKey对象转换为特殊的ADB格式
@@ -29,14 +45,13 @@ class AndroidPubkey {
   /// [name] 不包含空终止符的名称
   /// 返回包含转换后的RSAPublicKey对象的字节数组
   static Uint8List encodeWithName(RSAPublicKey publicKey, String name) {
-
     final encodedKey = encode(publicKey);
-    
+
     // 创建包含编码密钥和名称的缓冲区
     final buffer = BytesBuilder();
     buffer.add(encodedKey);
     buffer.add(_getUserInfo(name));
-    
+
     return buffer.toBytes();
   }
 
@@ -50,7 +65,9 @@ class AndroidPubkey {
   /// 返回Android自定义二进制格式的公共RSA密钥
   static Uint8List encode(RSAPublicKey publicKey) {
     if (_bigIntToBytes(publicKey.modulus!).length < androidPubkeyModulusSize) {
-      throw ArgumentError('无效的密钥长度: ${_bigIntToBytes(publicKey.modulus!).length}');
+      throw ArgumentError(
+        '无效的密钥长度: ${_bigIntToBytes(publicKey.modulus!).length}',
+      );
     }
 
     final keyStruct = ByteData(androidPubkeyEncodedSize);
@@ -70,16 +87,23 @@ class AndroidPubkey {
 
     // 存储模数
     final modulusBytes = _bigEndianToLittleEndianPadded(
-        androidPubkeyModulusSize, publicKey.modulus!);
+      androidPubkeyModulusSize,
+      publicKey.modulus!,
+    );
     for (var i = 0; i < modulusBytes.length; i++) {
       keyStruct.setUint8(offset + i, modulusBytes[i]);
     }
     offset += androidPubkeyModulusSize;
 
     // 计算并存储rr = (2^(rsa_size)) ^ 2 mod N
-    var rr = BigInt.from(2).pow(androidPubkeyModulusSize * 8); // rr = 2^(rsa_size)
+    var rr = BigInt.from(
+      2,
+    ).pow(androidPubkeyModulusSize * 8); // rr = 2^(rsa_size)
     rr = rr.modPow(BigInt.from(2), publicKey.modulus!); // rr = rr^2 mod N
-    final rrBytes = _bigEndianToLittleEndianPadded(androidPubkeyModulusSize, rr);
+    final rrBytes = _bigEndianToLittleEndianPadded(
+      androidPubkeyModulusSize,
+      rr,
+    );
     for (var i = 0; i < rrBytes.length; i++) {
       keyStruct.setUint8(offset + i, rrBytes[i]);
     }
@@ -96,14 +120,14 @@ class AndroidPubkey {
     final out = Uint8List(len);
     final bytes = _swapEndianness(_bigIntToBytes(input)); // 转换大端序 -> 小端序
     var numBytes = bytes.length;
-    
+
     if (len < numBytes) {
       if (!_fitsInBytes(bytes, numBytes, len)) {
         throw ArgumentError('数据不适合指定长度');
       }
       numBytes = len;
     }
-    
+
     for (var i = 0; i < numBytes; i++) {
       out[i] = bytes[i];
     }
@@ -151,12 +175,18 @@ class AndroidPubkey {
     offset += 4;
 
     // 读取模数
-    final modulusBytes = pubkeyBytes.sublist(offset, offset + androidPubkeyModulusSize);
+    final modulusBytes = pubkeyBytes.sublist(
+      offset,
+      offset + androidPubkeyModulusSize,
+    );
     final modulus = _littleEndianToBigInt(modulusBytes);
     offset += androidPubkeyModulusSize;
 
     // 读取rr
-    final rrBytes = pubkeyBytes.sublist(offset, offset + androidPubkeyModulusSize);
+    final rrBytes = pubkeyBytes.sublist(
+      offset,
+      offset + androidPubkeyModulusSize,
+    );
     final rr = _littleEndianToBigInt(rrBytes);
     offset += androidPubkeyModulusSize;
 
@@ -189,17 +219,17 @@ class AndroidPubkey {
     if (hex.length % 2 != 0) {
       hex = '0$hex';
     }
-    
+
     final bytes = <int>[];
     for (var i = 0; i < hex.length; i += 2) {
       bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
     }
-    
+
     // 确保最高位不为0
     if (bytes.isNotEmpty && bytes[0] >= 0x80) {
       bytes.insert(0, 0);
     }
-    
+
     return Uint8List.fromList(bytes);
   }
 }

@@ -12,10 +12,11 @@ class AdbShellStream {
   final StreamController<String> _stdoutController = StreamController<String>.broadcast();
   final StreamController<String> _stderrController = StreamController<String>.broadcast();
   final StreamController<int> _exitCodeController = StreamController<int>.broadcast();
-  
+  final bool _debug;
+
   bool _isClosed = false;
   
-  AdbShellStream._(this._adbStream) {
+  AdbShellStream._(this._adbStream, {bool debug = false}) : _debug = debug {
     _startReading();
   }
   
@@ -31,15 +32,17 @@ class AdbShellStream {
   /// 执行Shell命令
   /// [command] Shell命令字符串
   /// [args] 命令参数列表
+  /// [debug] 是否启用调试模式
   /// 返回AdbShellStream实例
   static Future<AdbShellStream> execute(
     AdbConnection connection,
     String command, [
     List<String> args = const [],
+    bool debug = false,
   ]) async {
     final fullCommand = _buildCommandString(command, args);
     final stream = await connection.open('shell,v2,raw:$fullCommand');
-    return AdbShellStream._(stream);
+    return AdbShellStream._(stream, debug: debug);
   }
   
   /// 写入数据到Shell输入
@@ -53,12 +56,47 @@ class AdbShellStream {
     await _adbStream.write(Uint8List.fromList(bytes));
   }
   
+  /// 读取所有标准输出内容
+  /// 返回完整的输出字符串
+  Future<String> readAll({Duration timeout = const Duration(seconds: 10)}) async {
+    final output = StringBuffer();
+    final completer = Completer<String>();
+
+    // 监听输出流
+    late StreamSubscription<String> subscription;
+    subscription = stdout.listen(
+      (data) {
+        output.write(data);
+      },
+      onDone: () {
+        if (!completer.isCompleted) {
+          completer.complete(output.toString());
+        }
+      },
+      onError: (error) {
+        if (!completer.isCompleted) {
+          completer.completeError(error);
+        }
+      },
+    );
+
+    // 设置超时
+    Timer(timeout, () {
+      if (!completer.isCompleted) {
+        subscription.cancel();
+        completer.complete(output.toString());
+      }
+    });
+
+    return completer.future;
+  }
+
   /// 关闭Shell流
   Future<void> close() async {
     if (_isClosed) {
       return;
     }
-    
+
     _isClosed = true;
     await _adbStream.close();
     await _stdoutController.close();
@@ -88,26 +126,40 @@ class AdbShellStream {
     if (data.isEmpty) {
       return;
     }
-    
-    // Shell v2协议格式：
+
+    // Shell v2协议格式（与Kotlin版本一致）：
     // 第一个字节表示数据类型：
-    // 0: stdout
-    // 1: stderr  
-    // 2: exit code
+    // 0: stdin
+    // 1: stdout
+    // 2: stderr
+    // 3: exit code
     final type = data[0];
     final payload = data.sublist(1);
-    
+
+    // 调试输出
+    if (_debug) {
+      print('调试: Shell数据类型=$type, 负载长度=${payload.length}, 内容="${utf8.decode(payload)}"');
+    }
+
     try {
       switch (type) {
-        case 0: // stdout
-          _stdoutController.add(utf8.decode(payload));
+        case 0: // stdin（通常不接收）
+          // 忽略stdin数据
           break;
-        case 1: // stderr
-          _stderrController.add(utf8.decode(payload));
+        case 1: // stdout
+          // 清理输出中的空字符和控制字符
+          final decoded = utf8.decode(payload);
+          final cleaned = decoded.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
+          _stdoutController.add(cleaned);
           break;
-        case 2: // exit code
+        case 2: // stderr
+          final decoded = utf8.decode(payload);
+          final cleaned = decoded.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
+          _stderrController.add(cleaned);
+          break;
+        case 3: // exit code
           if (payload.isNotEmpty) {
-            final exitCode = int.parse(utf8.decode(payload));
+            final exitCode = payload[0]; // exit code是单个字节
             _exitCodeController.add(exitCode);
           }
           break;

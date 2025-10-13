@@ -21,6 +21,7 @@ export 'core/adb_message_queue.dart';
 // 证书和密钥管理
 export 'cert/adb_key_pair.dart';
 export 'cert/cert_utils.dart';
+export 'cert/key_pair_storage.dart';
 
 // 传输通道
 export 'transport/transport_channel.dart';
@@ -57,11 +58,13 @@ class KadbDart {
     AdbKeyPair? keyPair,
     int connectTimeoutMs = 10000,
     int ioTimeoutMs = 30000,
+    bool debug = false,
   }) async {
     final actualKeyPair = keyPair ?? await AdbKeyPair.generate();
     final connection = AdbConnection(
       keyPair: actualKeyPair,
       ioTimeout: Duration(milliseconds: ioTimeoutMs),
+      debug: debug,
     );
     await connection.connect(host, port);
     return connection;
@@ -71,12 +74,14 @@ class KadbDart {
   /// [connection] ADB连接
   /// [command] Shell命令
   /// [args] 命令参数
+  /// [debug] 是否启用调试模式
   static Future<AdbShellStream> executeShell(
     AdbConnection connection,
     String command, [
     List<String> args = const [],
+    bool debug = false,
   ]) async {
-    return AdbShellStream.execute(connection, command, args);
+    return AdbShellStream.execute(connection, command, args, debug);
   }
   
   /// 打开同步流
