@@ -13,12 +13,6 @@ import 'package:kadb_dart/cert/android_pubkey.dart';
 /// - 公钥格式转换
 /// - PEM编码/解码
 class CertUtils {
-
-  // 持久化缓存目录 - 与真实ADB一致，放在项目根目录的.android文件夹中
-  static const String _cacheDir = '.android';
-  static const String _privateKeyFile = '$_cacheDir/adbkey';
-  static const String _certificateFile = '$_cacheDir/adbkey.pub';
-
   /// 加载或生成ADB密钥对 - 核心缓存机制
   /// [cacheDir] 缓存目录路径，默认为'.android'
   /// 返回AdbKeyPair对象
@@ -60,7 +54,7 @@ class CertUtils {
     print('🔑 生成新的密钥对并保存到文件缓存');
     return keyPair;
   }
-  
+
   /// PEM编码/解码方法
   /// 将私钥导出为PEM格式
   static String toPrivateKeyPem(AdbKeyPair keyPair) {
@@ -77,8 +71,12 @@ class CertUtils {
   /// 将公钥导出为OpenSSH格式
   static String toPublicKeySsh(AdbKeyPair keyPair) {
     final keyType = 'ssh-rsa';
-    final exponentBytes = _encodeBigInt(keyPair.publicKey.exponent ?? BigInt.zero);
-    final modulusBytes = _encodeBigInt(keyPair.publicKey.modulus ?? BigInt.zero);
+    final exponentBytes = _encodeBigInt(
+      keyPair.publicKey.exponent ?? BigInt.zero,
+    );
+    final modulusBytes = _encodeBigInt(
+      keyPair.publicKey.modulus ?? BigInt.zero,
+    );
 
     final publicKeyBytes = Uint8List(
       4 + keyType.length + 4 + exponentBytes.length + 4 + modulusBytes.length,
@@ -138,7 +136,10 @@ class CertUtils {
   }
 
   /// 生成用于认证的ADB格式公钥
-  static Uint8List generateAuthFormatPublicKey(AdbKeyPair keyPair, String systemIdentity) {
+  static Uint8List generateAuthFormatPublicKey(
+    AdbKeyPair keyPair,
+    String systemIdentity,
+  ) {
     // 1. 获取Android格式的公钥数据
     final androidPublicKeyBytes = AndroidPubkey.encode(keyPair.publicKey);
 
@@ -153,30 +154,49 @@ class CertUtils {
 
   /// 系统身份标识生成
   /// 生成系统身份标识（与真实ADB一致）
-  static String generateSystemIdentity({String softwareName = ''}) {
-    // 真实ADB使用简单的 user@host 格式，不包含软件名称
-    final deviceIdentifier = _getDeviceIdentifier();
+  static String generateSystemIdentity({
+    String? userName,
+    String? hostName,
+    String softwareName = ''
+  }) {
+    // 如果用户提供了用户名和主机名，直接使用
+    if (userName != null && hostName != null) {
+      return '$userName@$hostName';
+    }
 
-    // 清理特殊字符，确保兼容性
-    final sanitizedDeviceName = deviceIdentifier.replaceAll(RegExp(r'[^a-zA-Z0-9._\-@]'), '_');
+    // 否则尝试获取系统信息
+    try {
+      // 获取真实的用户名和主机名
+      final resolvedUserName = userName ??
+          (Process.runSync('whoami', [], runInShell: true).stdout as String).trim();
 
-    return sanitizedDeviceName;
+      final resolvedHostName = hostName ??
+          (Process.runSync('hostname', [], runInShell: true).stdout as String).trim();
+
+      return '$resolvedUserName@$resolvedHostName';
+    } catch (e) {
+      // 如果系统命令失败，回退到环境变量或默认值
+      final finalUserName = userName ??
+          Platform.environment['USER'] ??
+          Platform.environment['USERNAME'] ??
+          Platform.environment['LOGNAME'] ??
+          'user';
+
+      final finalHostName = hostName ??
+          Platform.environment['COMPUTERNAME'] ??
+          Platform.environment['HOSTNAME'] ??
+          Platform.environment['HOST'] ??
+          'localhost';
+
+      return '$finalUserName@$finalHostName';
+    }
   }
 
   /// 获取设备标识符（与真实ADB一致）
   /// 返回格式：用户名@主机名
+  /// 内部方法，使用统一的默认值策略
   static String _getDeviceIdentifier() {
-    final userName = Platform.environment['USER'] ??
-        Platform.environment['USERNAME'] ??
-        Platform.environment['LOGNAME'] ??
-        'root';
-
-    final hostName = Platform.environment['COMPUTERNAME'] ??
-        Platform.environment['HOSTNAME'] ??
-        Platform.environment['HOST'] ??
-        'localhost';
-
-    return '$userName@$hostName';
+    return generateSystemIdentity();
   }
 
   // ========== 私有辅助方法 ==========
@@ -350,7 +370,11 @@ class CertUtils {
   }
 
   /// 写入长度前缀的数据
-  static void _writeLengthPrefixed(Uint8List buffer, int offset, Uint8List data) {
+  static void _writeLengthPrefixed(
+    Uint8List buffer,
+    int offset,
+    Uint8List data,
+  ) {
     buffer[offset] = (data.length >> 24) & 0xFF;
     buffer[offset + 1] = (data.length >> 16) & 0xFF;
     buffer[offset + 2] = (data.length >> 8) & 0xFF;

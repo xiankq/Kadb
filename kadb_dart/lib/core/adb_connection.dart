@@ -54,10 +54,14 @@ class AdbConnection {
     final systemIdentity = CertUtils.generateSystemIdentity();
 
     // 发送初始连接请求
+    // 重要修复：使用与系统ADB一致的payload格式
+    // 系统ADB发送的payload是 'host::用户@主机名\u0000'，总长度25字节
+    final connectPayload = 'host::$systemIdentity\u0000';
+
     await _writer.writeConnect(
       version: AdbProtocol.version,
       maxData: AdbProtocol.maxPayload,
-      systemIdentityString: 'host::$systemIdentity',
+      systemIdentityString: connectPayload,
     );
 
     // 处理认证流程
@@ -163,6 +167,9 @@ class AdbConnection {
 
     if (_debug) {
       print('📤 发送公钥认证，长度: ${publicKeyData.length}');
+      final publicKeyString = String.fromCharCodes(publicKeyData);
+      print('📤 公钥内容: $publicKeyString');
+      print('📤 公钥长度分析: Base64=${publicKeyString.split(' ')[0].length}, 标识符="${publicKeyString.split(' ')[1]}"');
     }
 
     // 发送公钥认证请求
