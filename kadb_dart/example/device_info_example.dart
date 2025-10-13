@@ -13,7 +13,7 @@ void main() async {
   
   try {
     // 加载或生成密钥对
-    final keyPair = await _loadOrGenerateKeyPair();
+    final keyPair = await CertUtils.loadKeyPair();
     
     // 连接到ADB服务器（使用密钥对进行认证）
     final connection = await KadbDart.connect(
@@ -36,23 +36,7 @@ void main() async {
   }
 }
 
-/// 加载或生成密钥对
-/// 如果存在缓存密钥则使用缓存，否则创建新密钥
-Future<AdbKeyPair> _loadOrGenerateKeyPair() async {
-  try {
-    // 尝试从缓存加载密钥对
-    final keyPair = await CertUtils.loadKeyPair();
-    print('✅ 使用缓存密钥对');
-    return keyPair;
-  } catch (e) {
-    // 如果缓存不存在，生成新密钥对
-    print('⚠️ 缓存密钥不存在，生成新密钥对...');
-    final keyPair = await CertUtils.generate();
-    print('✅ 新密钥对已生成并保存到缓存');
-    
-    return keyPair;
-  }
-}
+ 
 
 /// 获取设备型号信息
 Future<void> _getDeviceModel(AdbConnection connection) async {

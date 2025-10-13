@@ -174,8 +174,8 @@ class AdbConnection {
      */
     
     const keyLengthBits = 2048;
-    const keyLengthBytes = keyLengthBits ~/ 8;
-    const keyLengthWords = keyLengthBytes ~/ 4;
+    const keyLengthBytes = 256; // 2048/8
+    const keyLengthWords = 64;  // 256/4
     
     final r32 = BigInt.from(1) << 32;
     final n = publicKey.modulus!;
@@ -187,22 +187,21 @@ class AdbConnection {
     final myN = List<int>.filled(keyLengthWords, 0);
     final myRr = List<int>.filled(keyLengthWords, 0);
     
-    // 处理模数n
+    // 与Kotlin版本完全一致：在一个循环中先处理R^2，再处理模数n
+    var tempRr = rr;
     var tempN = n;
     for (int i = 0; i < keyLengthWords; i++) {
-      final res = tempN ~/ r32;
-      final remainder = tempN % r32;
-      tempN = res;
-      myN[i] = remainder.toInt();
-    }
-    
-    // 处理R^2
-    var tempRr = rr;
-    for (int i = 0; i < keyLengthWords; i++) {
-      final res = tempRr ~/ r32;
-      final remainder = tempRr % r32;
-      tempRr = res;
-      myRr[i] = remainder.toInt();
+      // 先处理R^2
+      final rrRes = tempRr ~/ r32;
+      final rrRemainder = tempRr % r32;
+      tempRr = rrRes;
+      myRr[i] = rrRemainder.toInt();
+      
+      // 再处理模数n
+      final nRes = tempN ~/ r32;
+      final nRemainder = tempN % r32;
+      tempN = nRes;
+      myN[i] = nRemainder.toInt();
     }
     
     // 构建字节缓冲区（小端序）
