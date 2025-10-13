@@ -1,11 +1,12 @@
 import 'dart:typed_data';
 import 'package:pointycastle/asymmetric/api.dart';
 import 'package:pointycastle/digests/sha256.dart';
-import 'adb_key_pair.dart';
-import 'android_pubkey.dart';
+import 'package:kadb_dart/cert/cert_utils.dart';
+import 'package:kadb_dart/cert/android_pubkey.dart';
 
 /// Kadb证书管理类
 /// 基于Kotlin原项目完整实现，用于处理ADB证书的生成、验证和管理
+/// 使用现有的CertUtils实现，避免重复造轮子
 class KadbCert {
   /// 证书版本
   static const int version = 1;
@@ -40,7 +41,7 @@ class KadbCert {
     return (_cert, _key);
   }
 
-  /// 生成新的密钥库并设置
+  /// 生成新的密钥库并设置（使用现有的CertUtils实现）
   static Future<(Uint8List, Uint8List)> get({
     int keySize = 2048,
     String cn = 'Kadb',
@@ -52,9 +53,9 @@ class KadbCert {
     int notAfterDays = 120,
   }) async {
     if (_cert.isEmpty || _key.isEmpty) {
-      // 生成新的密钥对
-      final keyPair = await AdbKeyPair.generate();
-      final certBytes = generateAdbCert(keyPair.publicKey);
+      // 使用现有的CertUtils实现加载或生成密钥对
+      final keyPair = await CertUtils.loadKeyPair();
+      final certBytes = _generateAdbCert(keyPair.publicKey);
       final keyBytes = _encodePrivateKey(keyPair.privateKey);
       
       _cert = certBytes;
@@ -64,7 +65,7 @@ class KadbCert {
   }
 
   /// 生成ADB证书
-  static Uint8List generateAdbCert(RSAPublicKey publicKey, {int certType = typeAdb}) {
+  static Uint8List _generateAdbCert(RSAPublicKey publicKey, {int certType = typeAdb}) {
     final pubkeyBytes = AndroidPubkey.encode(publicKey);
     
     // 计算总大小
@@ -85,6 +86,8 @@ class KadbCert {
     
     return buffer.buffer.asUint8List();
   }
+
+
 
   /// 解析ADB证书
   static RSAPublicKey parseAdbCert(Uint8List certBytes) {

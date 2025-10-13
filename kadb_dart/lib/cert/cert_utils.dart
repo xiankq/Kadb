@@ -131,21 +131,17 @@ class CertUtils {
     try {
       // 解析X.509证书并验证有效性
       final certBytes = _extractCertificateBytes(certificate);
-      print('调试: 提取的证书字节长度=${certBytes.length}');
       
       // 完整实现：解析X.509证书结构
       final parser = asn1.ASN1Parser(certBytes);
       final certificateSequence = parser.nextObject() as asn1.ASN1Sequence;
-      print('调试: 证书序列元素数量=${certificateSequence.elements.length}');
       
       // 安全地解析证书结构
       var tbsCertificate = certificateSequence.elements[0];
       if (tbsCertificate is asn1.ASN1Sequence) {
         // 标准X.509结构：证书序列的第一个元素是tbsCertificate
-        print('调试: 使用标准X.509结构');
       } else {
         // 可能是其他结构，尝试直接使用整个序列
-        print('调试: 使用整个证书序列作为tbsCertificate');
         tbsCertificate = certificateSequence;
       }
       
@@ -166,7 +162,6 @@ class CertUtils {
               validitySequenceFound = true;
               notBeforeElement = firstElement;
               notAfterElement = secondElement;
-              print('调试: 找到有效期序列');
               break;
             }
           }
@@ -238,8 +233,8 @@ class CertUtils {
   /// 读取私钥
   static String? _readPrivateKey() {
     try {
-      // 从kadb_dart项目目录读取私钥文件，避免污染全局环境
-      final privateKeyFile = File('kadb_dart/adbkey');
+      // 从kadb_dart/cert_cache目录读取私钥文件，避免污染全局环境
+      final privateKeyFile = File('kadb_dart/cert_cache/adbkey');
       if (privateKeyFile.existsSync()) {
         return privateKeyFile.readAsStringSync();
       }
@@ -252,8 +247,8 @@ class CertUtils {
   /// 读取证书
   static String? _readCertificate() {
     try {
-      // 从kadb_dart项目目录读取证书文件，避免污染全局环境
-      final certFile = File('kadb_dart/adbkey.pub');
+      // 从kadb_dart/cert_cache目录读取证书文件，避免污染全局环境
+      final certFile = File('kadb_dart/cert_cache/adbkey.pub');
       if (certFile.existsSync()) {
         return certFile.readAsStringSync();
       }
@@ -402,8 +397,8 @@ class CertUtils {
   /// 保存私钥
   static void _savePrivateKey(String privateKey) {
     try {
-      // 保存私钥到kadb_dart项目目录，避免污染全局环境
-      final privateKeyFile = File('kadb_dart/adbkey');
+      // 保存私钥到kadb_dart/cert_cache目录，避免污染全局环境
+      final privateKeyFile = File('kadb_dart/cert_cache/adbkey');
       privateKeyFile.createSync(recursive: true);
       privateKeyFile.writeAsStringSync(privateKey);
     } catch (e) {
@@ -414,8 +409,8 @@ class CertUtils {
   /// 保存证书
   static void _saveCertificate(String certificate) {
     try {
-      // 保存证书到kadb_dart项目目录，避免污染全局环境
-      final certFile = File('kadb_dart/adbkey.pub');
+      // 保存证书到kadb_dart/cert_cache目录，避免污染全局环境
+      final certFile = File('kadb_dart/cert_cache/adbkey.pub');
       certFile.createSync(recursive: true);
       certFile.writeAsStringSync(certificate);
     } catch (e) {

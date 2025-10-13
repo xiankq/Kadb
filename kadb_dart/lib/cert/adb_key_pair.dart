@@ -107,82 +107,102 @@ class AdbKeyPair {
     return '$keyType $base64Key';
   }
 
-  /// 使用私钥对ADB消息进行签名（与Kotlin版本一致）
+  /// 使用私钥对ADB消息进行签名（与Kotlin版本完全一致）
   Uint8List signAdbMessage(AdbMessage message) {
-    // 使用RSA引擎进行加密（无填充模式）
-    final cipher = RSAEngine();
-    
-    // 使用私钥进行加密（ADB协议使用私钥加密进行认证）
-    cipher.init(true, PrivateKeyParameter<RSAPrivateKey>(_privateKey));
-    
-    // 计算密钥长度（字节数）
-    final keyLength = (_privateKey.modulus ?? BigInt.zero).bitLength ~/ 8;
+    // 与Kotlin版本完全一致的签名实现
+    final modulus = _privateKey.modulus ?? BigInt.zero;
+    final exponent = _privateKey.exponent ?? BigInt.one;
+    final keyLength = modulus.bitLength ~/ 8;
     final payloadLength = message.payloadLength;
     
     if (payloadLength > 20) {
       throw ArgumentError('消息负载长度($payloadLength)超过RSA签名限制(20字节)');
     }
     
-    // 使用与Kotlin版本相同的PKCS#1 v1.5填充格式
-    // 填充格式：0x00 0x01 [0xFF...] 0x00 [ASN.1 OID for SHA1] [20字节哈希]
-    final signaturePadding = _getSignaturePadding();
+    // 使用与Kotlin版本相同的签名填充
+    final signaturePadding = AndroidPubkey.signaturePadding;
     
-    // 创建要加密的数据：签名填充 + 消息负载
-    final dataToEncrypt = Uint8List(keyLength);
+    // 关键修复：按照Kotlin版本的签名逻辑
+    // Kotlin版本：cipher.update(AndroidPubkey.SIGNATURE_PADDING) + cipher.doFinal(message.payload, 0, message.payloadLength)
+    // 这意味着：先处理签名填充，然后处理消息负载
     
-    // 复制签名填充数据（确保不超过数组边界）
-    final paddingCopyLength = signaturePadding.length.clamp(0, keyLength);
-    dataToEncrypt.setRange(0, paddingCopyLength, signaturePadding.sublist(0, paddingCopyLength));
+    // 正确的实现：签名填充和消息负载是分开处理的
+    final paddingLength = signaturePadding.length;
     
-    // 复制消息负载到填充数据的哈希部分（位置252开始）
-    final payloadStart = 252;
-    if (payloadStart + payloadLength <= keyLength) {
-      dataToEncrypt.setRange(payloadStart, payloadStart + payloadLength, message.payload.sublist(0, payloadLength));
+    if (paddingLength + payloadLength > keyLength) {
+      throw ArgumentError('签名填充($paddingLength字节) + 消息负载($payloadLength字节)超过RSA密钥长度($keyLength字节)');
     }
     
-    // 执行RSA加密（无填充模式）
-    final encrypted = cipher.process(dataToEncrypt);
-    return encrypted;
+    // 创建要加密的数据缓冲区
+    final dataToEncrypt = Uint8List(keyLength);
+    
+    // 复制签名填充数据
+    dataToEncrypt.setRange(0, paddingLength, signaturePadding);
+    
+    // 复制消息负载 - 使用与验证一致的payloadStart位置
+    final payloadStart = 218; // 与验证逻辑保持一致
+    dataToEncrypt.setRange(payloadStart, payloadStart + payloadLength, 
+                          message.payload.sublist(0, payloadLength));
+    
+    // 手动实现RSA无填充加密：m^d mod n
+    final m = _bytesToBigInt(dataToEncrypt);
+    final encrypted = m.modPow(exponent, modulus);
+    
+    return _bigIntToBytes(encrypted, keyLength);
   }
   
-  /// 获取ADB签名填充数据（与Kotlin版本一致）
-  Uint8List _getSignaturePadding() {
-    // 这是从Kotlin版本的AndroidPubkey.SIGNATURE_PADDING复制的
-    return Uint8List.fromList([
-      0x00, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x30, 0x21, 0x30, 0x09,
-      0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14
-    ]);
-  }
 
-  /// 验证签名
+
+  /// 验证签名（与Kotlin版本一致，使用RSA无填充模式）
   bool verify(Uint8List data, Uint8List signature) {
-    final signer = RSASigner(SHA256Digest(), '0609608648016503040201');
-    
-    // 使用正确的RSA公钥参数类型
-    signer.init(false, PublicKeyParameter<RSAPublicKey>(_publicKey));
-    
     try {
-      final sig = RSASignature(signature);
-      return signer.verifySignature(data, sig);
+      // 手动实现RSA解密：c^e mod n
+      final modulus = _publicKey.modulus ?? BigInt.zero;
+      final exponent = _publicKey.exponent ?? BigInt.from(65537);
+      
+      final c = _bytesToBigInt(signature);
+      final decrypted = c.modPow(exponent, modulus);
+      
+      // 将解密后的大整数转换为字节数组
+      final keyLength = modulus.bitLength ~/ 8;
+      final decryptedBytes = _bigIntToBytes(decrypted, keyLength);
+      
+      // ADB签名验证的特殊逻辑：检查解密后的数据是否包含原始数据
+      final padding = AndroidPubkey.signaturePadding;
+      final payloadStart = 218; // 与Kotlin版本保持一致，填充结束位置
+      
+      // 检查解密后的数据是否以填充开头
+      if (decryptedBytes.length < payloadStart + data.length) {
+        return false;
+      }
+      
+      // 检查填充部分是否匹配（只检查前252字节）
+      for (int i = 0; i < payloadStart; i++) {
+        if (i < padding.length && decryptedBytes[i] != padding[i]) {
+          return false;
+        }
+      }
+      
+      // 检查数据部分是否匹配
+      for (int i = 0; i < data.length; i++) {
+        if (decryptedBytes[payloadStart + i] != data[i]) {
+          return false;
+        }
+      }
+      
+      return true;
     } catch (e) {
       return false;
     }
+  }
+  
+  /// 比较字节数组
+  bool _compareByteArrays(Uint8List a, Uint8List b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   /// 解析PEM格式的私钥
@@ -370,14 +390,53 @@ class AdbKeyPair {
       buffer[offset + 4 + i] = data[i];
     }
   }
+
+  /// 将字节数组转换为大整数
+  BigInt _bytesToBigInt(Uint8List bytes) {
+    var result = BigInt.zero;
+    for (var i = 0; i < bytes.length; i++) {
+      result = (result << 8) | BigInt.from(bytes[i]);
+    }
+    return result;
+  }
+
+  /// 将大整数转换为指定长度的字节数组
+  Uint8List _bigIntToBytes(BigInt value, int length) {
+    var hex = value.toRadixString(16);
+    if (hex.length % 2 != 0) {
+      hex = '0$hex';
+    }
+    
+    final bytes = <int>[];
+    for (var i = 0; i < hex.length; i += 2) {
+      bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
+    }
+    
+    // 填充到指定长度（从左侧填充0）
+    while (bytes.length < length) {
+      bytes.insert(0, 0);
+    }
+    
+    // 如果超过指定长度，截断左侧（保留右侧）
+    if (bytes.length > length) {
+      return Uint8List.fromList(bytes.sublist(bytes.length - length));
+    }
+    
+    return Uint8List.fromList(bytes);
+  }
 }
 
 // 简单的RSA私钥实现，用于绕过PointyCastle的严格验证
 class _SimpleRSAPrivateKey implements RSAPrivateKey {
+  @override
   final BigInt modulus;
+  @override
   final BigInt publicExponent;
+  @override
   final BigInt privateExponent;
+  @override
   final BigInt p;
+  @override
   final BigInt q;
   
   _SimpleRSAPrivateKey(

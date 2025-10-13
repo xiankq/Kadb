@@ -13,6 +13,7 @@ enum _TcpForwarderState {
 
 /// TCP端口转发器
 /// 实现本地端口到设备端口的TCP转发
+/// 完整复刻Kotlin版本的线程池缓存机制
 class TcpForwarder {
   final AdbConnection _kadb;
   final int _hostPort;

@@ -260,7 +260,7 @@ class AdbMessageQueue {
       }
       rethrow;
     } finally {
-      subscription?.cancel();
+      subscription.cancel();
       timer.cancel();
     }
   }

@@ -171,24 +171,22 @@ class Kadb {
 
   /// 获取连接
   AdbConnection _getConnection() {
-    if (_connection == null || _transportChannel?.isOpen != true) {
+    if (_connection == null) {
       throw StateError('连接未建立，请先调用_createNewConnection()');
     }
     return _connection!;
   }
 
   /// 创建新连接
-  Future<void> _createNewConnection() async {
+  Future<void> _createNewConnection({AdbKeyPair? keyPair}) async {
     var attempt = 0;
     while (true) {
       attempt++;
       try {
-        final keyPair = await AdbKeyPair.generate();
-        final connection = AdbConnection(keyPair: keyPair);
+        final connectionKeyPair = keyPair ?? await AdbKeyPair.generate();
+        final connection = AdbConnection(keyPair: connectionKeyPair);
         await connection.connect(host, port);
         _connection = connection;
-        // 注意：这里需要获取实际的传输通道，但目前先设置为null
-        // _transportChannel = connection._currentChannel;
         return;
       } catch (e) {
         print('连接丢失；尝试重新建立连接，第$attempt次');
@@ -363,9 +361,9 @@ extension KadbCompanion on Kadb {
   }
 
   /// 创建Kadb实例
-  static Future<Kadb> create(String host, int port, {int connectTimeout = 0, int socketTimeout = 0}) async {
+  static Future<Kadb> create(String host, int port, {int connectTimeout = 0, int socketTimeout = 0, AdbKeyPair? keyPair}) async {
     final kadb = Kadb(host, port, connectTimeout: connectTimeout, socketTimeout: socketTimeout);
-    await kadb._createNewConnection();
+    await kadb._createNewConnection(keyPair: keyPair);
     return kadb;
   }
 

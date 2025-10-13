@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:kadb_dart/kadb_dart.dart';
-import 'package:kadb_dart/cert/cert_utils.dart';
 
 /// 设备信息获取示例
 /// 连接到指定ADB服务器并获取设备型号信息

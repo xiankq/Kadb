@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:pointycastle/export.dart';
 import 'package:kadb_dart/cert/adb_key_pair.dart';
@@ -11,7 +12,6 @@ import 'package:kadb_dart/queue/adb_message_queue.dart';
 import 'package:kadb_dart/stream/adb_stream.dart';
 import 'package:kadb_dart/transport/transport_channel.dart' as base;
 import 'package:kadb_dart/transport/socket_transport_channel.dart';
-import 'package:kadb_dart/transport/tls_nio_channel.dart';
 
 /// ADB连接类
 /// 管理ADB协议连接、认证和流操作
@@ -89,12 +89,12 @@ class AdbConnection {
           break;
           
         case AdbProtocol.CMD_AUTH:
-          // 处理认证
+          // 处理认证（与Kotlin版本完全一致）
           if (message.arg0 != AdbProtocol.authTypeToken) {
             throw Exception('不支持的认证类型: ${message.arg0}');
           }
           
-          // 签名负载
+          // 签名负载（与Kotlin版本一致）
           final signature = _keyPair.signAdbMessage(AdbMessage(
             command: message.command,
             arg0: message.arg0,
@@ -106,19 +106,19 @@ class AdbConnection {
           ));
           await _writer.writeAuth(AdbProtocol.authTypeSignature, signature);
           
-          // 读取下一条消息
+          // 读取下一条消息（与Kotlin版本一致）
           message = await _messageQueue.next();
           
-          // 如果还是AUTH消息，发送公钥
+          // 如果还是AUTH消息，发送公钥（与Kotlin版本一致）
           if (message.command == AdbProtocol.CMD_AUTH) {
             final publicKey = _generateAdbPublicKey(_keyPair);
             await _writer.writeAuth(AdbProtocol.authTypeRsapublickey, publicKey);
             
-            // 读取最终认证结果
+            // 读取最终认证结果（与Kotlin版本一致）
             message = await _messageQueue.next();
           }
           
-          // 检查是否是CNXN连接确认
+          // 检查是否是CNXN连接确认（与Kotlin版本一致）
           if (message.command != AdbProtocol.CMD_CNXN) {
             throw Exception('认证失败: 期望CNXN消息，收到${message.command}');
           }
@@ -149,10 +149,10 @@ class AdbConnection {
     // 使用与Kotlin版本一致的Android RSA公钥格式转换
     final publicKeyBytes = _convertRsaPublicKeyToAdbFormat(keyPair.publicKey);
     
-    // 转换为Base64编码，并添加设备名称后缀（与Kotlin版本一致）
+    // 转换为Base64编码，并添加设备名称后缀（与Kotlin版本完全一致）
     final base64Key = base64.encode(publicKeyBytes);
-    final deviceName = 'Dart-ADB-1.0.0';
-    final fullKey = '$base64Key $deviceName}';
+    final deviceName = _generateSystemIdentity();
+    final fullKey = '$base64Key $deviceName}}'; // 注意：空格和两个右花括号，与Kotlin版本完全一致
     
     return utf8.encode(fullKey);
   }
@@ -269,9 +269,11 @@ class AdbConnection {
     }
   }
   
-  /// 生成系统标识字符串
+  /// 生成系统标识字符串（与Kotlin版本完全一致）
   String _generateSystemIdentity() {
-    return 'Dart-ADB-1.0.0';
+    final userName = Platform.environment['USER'] ?? Platform.environment['USERNAME'] ?? 'unknown';
+    final hostName = Platform.environment['COMPUTERNAME'] ?? Platform.environment['HOSTNAME'] ?? 'unknown';
+    return '$userName@$hostName@Kadb';
   }
   
   /// 打开ADB流
