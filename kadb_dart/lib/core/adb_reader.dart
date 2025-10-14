@@ -7,8 +7,9 @@ import 'package:kadb_dart/core/adb_protocol.dart';
 /// 负责从数据源读取ADB协议消息
 class AdbReader {
   final Future<List<int>> Function(int) _readBytes;
-  
-  AdbReader(this._readBytes);
+  final bool _debug;
+
+  AdbReader(this._readBytes, {bool debug = false}) : _debug = debug;
 
   /// 读取一个完整的ADB消息
   /// 返回解析后的AdbMessage对象
@@ -41,9 +42,11 @@ class AdbReader {
       magic: magic,
       payload: payload,
     );
-    
-    print('(${DateTime.now()}) < $message');
-    
+
+    if (_debug) {
+      print('(${DateTime.now()}) < $message');
+    }
+
     return message;
   }
   

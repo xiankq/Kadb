@@ -93,7 +93,7 @@ class AdbProtocol {
     // };
 
     final message = <int>[];
-    
+
     // 写入命令和参数（小端序）
     _writeIntLe(message, command);
     _writeIntLe(message, arg0);
@@ -112,7 +112,8 @@ class AdbProtocol {
 
     // 写入负载数据
     if (data != null) {
-      message.addAll(data.sublist(offset, offset + length));
+      final payloadData = data.sublist(offset, offset + length);
+      message.addAll(payloadData);
     }
 
     return message;

@@ -48,7 +48,11 @@ class AdbMessage {
         return 'payload[$payloadLength]';
       
       case AdbProtocol.CMD_OPEN:
-        return utf8.decode(payload.sublist(0, payloadLength - 1));
+        try {
+          return utf8.decode(payload.sublist(0, payloadLength - 1));
+        } catch (e) {
+          return 'open[${payloadLength - 1}]';
+        }
       
       default:
         return 'payload[$payloadLength]';
@@ -57,28 +61,42 @@ class AdbMessage {
 
   String? _shellPayloadStr() {
     if (payloadLength < 5) return null;
-    
+
     final id = payload[0];
     if (id < 0 || id > 3) return null;
-    
+
     final length = _readIntLe(payload, 1);
     if (length != payloadLength - 5) return null;
-    
+
     if (id == 3) { // ID_EXIT
       return '[shell] exit(${payload[5]})';
     }
-    
-    final payloadStr = utf8.decode(payload.sublist(5, payloadLength));
-    return '[shell] $payloadStr';
+
+    // 安全地解码shell payload，避免UTF-8解码错误
+    try {
+      final payloadStr = utf8.decode(payload.sublist(5, payloadLength));
+      return '[shell] $payloadStr';
+    } catch (e) {
+      // 如果UTF-8解码失败，返回简单的长度信息
+      return '[shell] binary[${payloadLength - 5}]';
+    }
   }
 
   String? _syncPayloadStr() {
     if (payloadLength < 8) return null;
-    
-    final id = utf8.decode(payload.sublist(0, 4));
+
+    // 安全地解码sync协议ID，避免UTF-8解码错误
+    String id;
+    try {
+      id = utf8.decode(payload.sublist(0, 4));
+    } catch (e) {
+      // 如果UTF-8解码失败，这不是一个有效的sync协议消息
+      return null;
+    }
+
     final syncIds = {'LIST', 'RECV', 'SEND', 'STAT', 'DATA', 'DONE', 'OKAY', 'QUIT', 'FAIL'};
     if (!syncIds.contains(id)) return null;
-    
+
     final arg = _readIntLe(payload, 4);
     return '[sync] $id($arg)';
   }

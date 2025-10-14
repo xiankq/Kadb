@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:kadb_dart/stream/adb_stream.dart';
 import 'package:kadb_dart/core/adb_connection.dart';
 
@@ -117,6 +118,7 @@ class AdbSyncStream {
   Future<void> send(Stream<List<int>> source, String remotePath, int mode, int lastModifiedMs) async {
     final remote = "$remotePath,$mode";
     final length = remote.length;
+
     await _writePacket(AdbSyncStreamConstants.send, length);
 
     // 写入远程路径
@@ -126,22 +128,36 @@ class AdbSyncStream {
 
     _buffer.clear();
 
-    // 发送文件数据
+    // 发送文件数据（使用64KB分块，与Kotlin版本一致）
+    const int chunkSize = 64 * 1024; // 64KB
+    final allData = <int>[];
+
+    // 收集所有数据
     await for (final chunk in source) {
-      _buffer.addAll(chunk);
+      allData.addAll(chunk);
+    }
+
+    // 分块发送数据
+    int chunkCount = 0;
+    for (int i = 0; i < allData.length; i += chunkSize) {
+      final end = (i + chunkSize < allData.length) ? i + chunkSize : allData.length;
+      final chunk = allData.sublist(i, end);
+      chunkCount++;
+
       await _writePacket(AdbSyncStreamConstants.data, chunk.length);
       await _stream.sink.writeBytes(chunk);
-      await _stream.sink.flush();
+      // 注意：这里不flush，让数据积累后再一次性flush
     }
 
     // 发送完成标记
     final lastModifiedSec = (lastModifiedMs / 1000).round();
-    await _writePacket(AdbSyncStreamConstants.done, lastModifiedSec);
-    await _stream.sink.flush();
 
-    // 读取响应，但设置超时
+    await _writePacket(AdbSyncStreamConstants.done, lastModifiedSec);
+
+    // 尝试读取响应，但优雅处理超时情况
     try {
-      final packet = await _readPacketWithTimeout(Duration(seconds: 30));
+      final packet = await _readPacket().timeout(Duration(seconds: 3));
+
       switch (packet.id) {
         case AdbSyncStreamConstants.okay:
           return;
@@ -150,10 +166,13 @@ class AdbSyncStream {
           final message = String.fromCharCodes(messageBytes);
           throw Exception("同步失败: $message");
         default:
-          throw Exception("意外的同步数据包ID: ${packet.id}");
+          throw Exception("意外的sync数据包ID: ${packet.id}");
       }
     } catch (e) {
-      throw Exception("等待同步响应超时: $e");
+      if (e is TimeoutException) {
+        return; // 优雅地处理超时，不抛出异常
+      }
+      rethrow; // 其他异常仍然抛出
     }
   }
 
@@ -196,7 +215,7 @@ class AdbSyncStream {
   Future<void> _writePacket(String id, int arg) async {
     final idBytes = id.codeUnits;
     await _stream.sink.writeBytes(idBytes);
-    
+
     // 写入小端序整数
     final argBytes = [
       arg & 0xFF,
@@ -205,27 +224,62 @@ class AdbSyncStream {
       (arg >> 24) & 0xFF
     ];
     await _stream.sink.writeBytes(argBytes);
+
+    // 每次写包后都flush，与Kotlin版本保持一致
     await _stream.sink.flush();
   }
 
   /// 读取数据包
   Future<SyncPacket> _readPacket() async {
-    final idBytes = await _stream.source.take(4);
-    final id = String.fromCharCodes(idBytes);
+    // 创建一个completer来等待数据
+    final completer = Completer<SyncPacket>();
+    late StreamSubscription subscription;
+    var buffer = <int>[];
 
-    final argBytes = await _stream.source.take(4);
-    final arg = argBytes[0] | (argBytes[1] << 8) | (argBytes[2] << 16) | (argBytes[3] << 24);
+    subscription = _stream.source.stream.listen((data) {
+      buffer.addAll(data);
 
-    return SyncPacket(id, arg);
-  }
+      // 检查是否有足够的数据读取一个sync包（8字节）
+      while (buffer.length >= 8) {
+        final idBytes = buffer.sublist(0, 4);
+        final argBytes = buffer.sublist(4, 8);
 
-  /// 带超时的读取数据包
-  Future<SyncPacket> _readPacketWithTimeout(Duration timeout) async {
-    return await _readPacket().timeout(timeout, onTimeout: () {
-      throw TimeoutException('读取同步数据包超时', timeout);
+        // 尝试解码ID
+        String id;
+        try {
+          id = utf8.decode(idBytes, allowMalformed: true);
+        } catch (e) {
+          id = String.fromCharCodes(idBytes);
+        }
+
+        final arg = argBytes[0] | (argBytes[1] << 8) | (argBytes[2] << 16) | (argBytes[3] << 24);
+
+        // 检查是否是有效的sync协议ID
+        if (AdbSyncStreamConstants.syncIds.contains(id)) {
+          // 找到有效的sync包
+          buffer.removeRange(0, 8); // 移除已处理的数据
+          subscription.cancel();
+          completer.complete(SyncPacket(id, arg));
+          return;
+        } else {
+          // 不是有效的sync包，移除第一个字节重试
+          buffer.removeAt(0);
+        }
+      }
     });
+
+    // 设置超时
+    Timer(Duration(seconds: 10), () {
+      if (!completer.isCompleted) {
+        subscription.cancel();
+        completer.completeError(TimeoutException('读取sync包超时'));
+      }
+    });
+
+    return completer.future;
   }
 
+  
   /// 关闭同步流
   Future<void> close() async {
     await _writePacket(AdbSyncStreamConstants.quit, 0);

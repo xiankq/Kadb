@@ -28,22 +28,40 @@ enum TcpForwarderState {
 
 /// TCP端口转发器
 /// 完整复刻Kotlin版本的实现，包括线程池、状态管理、超时处理等功能
+/// 支持两种模式：
+/// 1. TCP到TCP转发 (tcp:port -> tcp:targetPort)
+/// 2. TCP到任意ADB服务 (tcp:port -> localabstract:name, shell:command等)
 class TcpForwarder {
   final AdbConnection _kadb;
   final int _hostPort;
-  final int _targetPort;
+  final String _destination;
+  final int? _targetPort; // 向后兼容
+  final bool _debug;
 
   TcpForwarderState _state = TcpForwarderState.stopped;
   ServerSocket? _server;
-  List<Future<void>> _clientFutures = [];
+  final List<Future<void>> _clientFutures = [];
   Timer? _stateCheckTimer;
 
-  /// 构造函数
-  TcpForwarder(this._kadb, this._hostPort, this._targetPort);
+  /// 构造函数 - 任意ADB目标服务
+  /// [kadb] ADB连接
+  /// [hostPort] 本地端口
+  /// [destination] 目标服务，如 "tcp:8080", "localabstract:scrcpy", "shell:cat"
+  TcpForwarder(this._kadb, this._hostPort, this._destination, {bool debug = false})
+      : _targetPort = null, _debug = debug;
+
+  /// 构造函数 - TCP到TCP转发（向后兼容）
+  /// [kadb] ADB连接
+  /// [hostPort] 本地端口
+  /// [targetPort] 目标端口
+  TcpForwarder.tcpToTcp(this._kadb, this._hostPort, int targetPort, {bool debug = false})
+      : _destination = 'tcp:$targetPort',
+        _targetPort = targetPort,
+        _debug = debug;
 
   /// 启动TCP转发
   ///
-  /// 启动一个TCP服务器在指定端口，将所有连接转发到设备端口
+  /// 启动一个TCP服务器在指定端口，将所有连接转发到目标服务
   ///
   /// 抛出 [StateError] 如果转发器已经启动
   /// 抛出 [SocketException] 如果无法绑定到指定端口
@@ -61,7 +79,13 @@ class TcpForwarder {
       // 监听客户端连接
       _server!.listen(_handleClientConnection, onError: _handleServerError);
 
-      print('TCP转发已启动: 本地端口 $_hostPort -> 设备端口 $_targetPort');
+      if (_debug) {
+        if (_targetPort != null) {
+          print('TCP转发已启动: 本地端口 $_hostPort -> 设备端口 $_targetPort');
+        } else {
+          print('TCP转发已启动: 本地端口 $_hostPort -> 设备服务 $_destination');
+        }
+      }
     } catch (e) {
       _moveToState(TcpForwarderState.stopped);
       rethrow;
@@ -72,9 +96,13 @@ class TcpForwarder {
   ///
   /// 为每个客户端连接创建独立的处理进行双向数据转发
   Future<void> _handleClientConnection(Socket client) async {
+    AdbStream? adbStream;
     try {
-      // 打开ADB TCP流到目标端口
-      final adbStream = await _kadb.open('tcp:$_targetPort');
+      // 打开ADB流到目标服务
+      adbStream = await _kadb.open(_destination);
+
+      // 等待远程ID分配，确保流已正确建立
+      await adbStream.waitForRemoteId();
 
       // 在独立的Future中处理双向转发
       final clientFuture = _handleClientForwarding(client, adbStream);
@@ -85,11 +113,30 @@ class TcpForwarder {
         _clientFutures.remove(clientFuture);
       }).catchError((e) {
         _clientFutures.remove(clientFuture);
+        if (_debug) {
+          print('TCP转发客户端连接错误: $e');
+        }
+        return null; // 返回null以匹配Future.then的类型
       });
 
     } catch (e) {
-      print('TCP转发错误: $e');
-      await client.close();
+      if (_debug) {
+        print('TCP转发错误: $e');
+      }
+      // 确保在出错时关闭客户端连接
+      try {
+        await client.close();
+      } catch (_) {
+        // 忽略关闭错误
+      }
+      // 如果ADB流已经创建但出错，也尝试关闭它
+      if (adbStream != null) {
+        try {
+          await adbStream.close();
+        } catch (_) {
+          // 忽略关闭错误
+        }
+      }
     }
   }
 
@@ -100,19 +147,29 @@ class TcpForwarder {
       final clientToAdb = _forwardDataFromSocket(client, adbStream.sink);
       final adbToClient = _forwardDataFromAdbStream(adbStream.source, client);
 
-      // 等待任意一个转发完成
+      // 等待任一方向的数据传输完成（任一方向断开则整个连接结束）
       await Future.any([clientToAdb, adbToClient]);
 
     } finally {
       // 清理资源
-      await client.close();
-      await adbStream.close();
+      try {
+        await client.close();
+      } catch (e) {
+        // 忽略关闭客户端的错误
+      }
+      try {
+        await adbStream.close();
+      } catch (e) {
+        // 忽略关闭ADB流的错误
+      }
     }
   }
 
   /// 处理服务器错误
   void _handleServerError(Object error) {
-    print('TCP转发服务器错误: $error');
+    if (_debug) {
+      print('TCP转发服务器错误: $error');
+    }
     if (_state == TcpForwarderState.started) {
       _moveToState(TcpForwarderState.stopped);
     }
@@ -169,9 +226,7 @@ class TcpForwarder {
 
       // 等待所有客户端连接完成
       if (_clientFutures.isNotEmpty) {
-        await Future.wait(_clientFutures).catchError((e) {
-          // 忽略客户端连接清理过程中的错误
-        });
+        await Future.wait(_clientFutures, eagerError: false);
         _clientFutures.clear();
       }
 
@@ -179,7 +234,13 @@ class TcpForwarder {
       _stateCheckTimer = null;
 
       _moveToState(TcpForwarderState.stopped);
-      print('TCP转发已停止: 端口 $_hostPort');
+      if (_debug) {
+        if (_targetPort != null) {
+          print('TCP转发已停止: 端口 $_hostPort');
+        } else {
+          print('TCP转发已停止: 本地端口 $_hostPort');
+        }
+      }
     } catch (e) {
       _moveToState(TcpForwarderState.stopped);
       rethrow;
@@ -195,8 +256,11 @@ class TcpForwarder {
   /// 获取本地端口
   int get hostPort => _hostPort;
 
-  /// 获取目标端口
-  int get targetPort => _targetPort;
+  /// 获取目标服务
+  String get destination => _destination;
+
+  /// 获取目标端口（向后兼容）
+  int? get targetPort => _targetPort;
 
   /// 移动到新状态
   void _moveToState(TcpForwarderState newState) {
@@ -249,12 +313,14 @@ class ReverseTcpForwarder {
   final AdbConnection _kadb;
   final int _devicePort;
   final int _hostPort;
+  final bool _debug;
 
   TcpForwarderState _state = TcpForwarderState.stopped;
   ServerSocket? _server;
   Timer? _stateCheckTimer;
 
-  ReverseTcpForwarder(this._kadb, this._devicePort, this._hostPort);
+  ReverseTcpForwarder(this._kadb, this._devicePort, this._hostPort, {bool debug = false})
+      : _debug = debug;
 
   /// 启动反向TCP转发
   ///
@@ -272,7 +338,9 @@ class ReverseTcpForwarder {
 
       _server!.listen(_handleReverseConnection);
 
-      print('反向TCP转发已启动: 设备端口 $_devicePort -> 本地端口 $_hostPort');
+      if (_debug) {
+        print('反向TCP转发已启动: 设备端口 $_devicePort -> 本地端口 $_hostPort');
+      }
     } catch (e) {
       _moveToState(TcpForwarderState.stopped);
       rethrow;
@@ -281,16 +349,35 @@ class ReverseTcpForwarder {
 
   /// 处理反向连接
   Future<void> _handleReverseConnection(Socket client) async {
+    AdbStream? adbStream;
     try {
       // 通过ADB连接到设备端口
-      final adbStream = await _kadb.open('tcp:$_devicePort');
+      adbStream = await _kadb.open('tcp:$_devicePort');
+
+      // 等待远程ID分配，确保流已正确建立
+      await adbStream.waitForRemoteId();
 
       // 建立双向数据转发
       await _setupBidirectionalForwarding(client, adbStream);
 
     } catch (e) {
-      print('反向TCP转发错误: $e');
-      await client.close();
+      if (_debug) {
+        print('反向TCP转发错误: $e');
+      }
+      // 确保在出错时关闭客户端连接
+      try {
+        await client.close();
+      } catch (_) {
+        // 忽略关闭错误
+      }
+      // 如果ADB流已经创建但出错，也尝试关闭它
+      if (adbStream != null) {
+        try {
+          await adbStream.close();
+        } catch (_) {
+          // 忽略关闭错误
+        }
+      }
     }
   }
 
@@ -357,7 +444,9 @@ class ReverseTcpForwarder {
       _stateCheckTimer = null;
 
       _moveToState(TcpForwarderState.stopped);
-      print('反向TCP转发已停止: 端口 $_hostPort');
+      if (_debug) {
+        print('反向TCP转发已停止: 端口 $_hostPort');
+      }
     } catch (e) {
       _moveToState(TcpForwarderState.stopped);
       rethrow;

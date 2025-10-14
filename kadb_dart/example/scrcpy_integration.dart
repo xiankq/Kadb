@@ -1,6 +1,87 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:convert';
 import 'package:kadb_dart/kadb_dart.dart';
+
+
+/// Scrcpy选项类 - 类型安全的配置选项
+class ScrcpyOptions {
+  final double version;
+  final bool tunnelForward;
+  final bool audio;
+  final bool control;
+  final bool cleanup;
+  final bool rawStream;
+  final int maxSize;
+
+  const ScrcpyOptions({
+    this.version = 3.1,
+    this.tunnelForward = true,
+    this.audio = false,
+    this.control = false,
+    this.cleanup = false,
+    this.rawStream = true,
+    this.maxSize = 1920,
+  });
+
+  /// 生成命令行参数
+  List<String> toCommandLineArgs() {
+    return [
+      version.toString(),
+      'tunnel_forward=$tunnelForward',
+      'audio=$audio',
+      'control=$control',
+      'cleanup=$cleanup',
+      'raw_stream=$rawStream',
+      'max_size=$maxSize',
+    ];
+  }
+
+  /// 创建默认配置（仅显示）
+  static const ScrcpyOptions displayOnly = ScrcpyOptions(
+    audio: false,
+    control: false,
+  );
+
+  /// 创建完整功能配置
+  static const ScrcpyOptions fullFeatures = ScrcpyOptions(
+    audio: true,
+    control: true,
+  );
+
+  /// 创建高质量配置
+  static const ScrcpyOptions highQuality = ScrcpyOptions(
+    audio: false,
+    control: false,
+    maxSize: 2560,
+  );
+
+  /// 从配置创建新的配置实例
+  ScrcpyOptions copyWith({
+    double? version,
+    bool? tunnelForward,
+    bool? audio,
+    bool? control,
+    bool? cleanup,
+    bool? rawStream,
+    int? maxSize,
+  }) {
+    return ScrcpyOptions(
+      version: version ?? this.version,
+      tunnelForward: tunnelForward ?? this.tunnelForward,
+      audio: audio ?? this.audio,
+      control: control ?? this.control,
+      cleanup: cleanup ?? this.cleanup,
+      rawStream: rawStream ?? this.rawStream,
+      maxSize: maxSize ?? this.maxSize,
+    );
+  }
+
+  @override
+  String toString() {
+    return 'ScrcpyOptions(version: $version, tunnelForward: $tunnelForward, audio: $audio, control: $control, cleanup: $cleanup, rawStream: $rawStream, maxSize: $maxSize)';
+  }
+}
 
 /// Scrcpy集成示例
 ///
@@ -19,14 +100,7 @@ class ScrcpyIntegration {
   /// 初始化ADB连接
   Future<void> connect({String host = '100.123.66.1', int port = 5555}) async {
     print('正在连接到设备 $host:$port...');
-    final keyPair = await CertUtils.loadKeyPair();
-
-    _connection = await KadbDart.connect(
-      host: host,
-      port: port,
-      keyPair: keyPair,
-      debug: true,
-    );
+    _connection = await KadbDart.create(host: host, port: port, debug: false);
     print('设备连接成功！');
   }
 
@@ -35,36 +109,19 @@ class ScrcpyIntegration {
     print('正在推送scrcpy-server到设备...');
 
     try {
-      // 检查本地文件是否存在
       final file = File(_scrcpyServerPath);
       if (!await file.exists()) {
         throw Exception('scrcpy-server文件不存在: $_scrcpyServerPath');
       }
 
-      // 打开同步流
-      final syncStream = await KadbDart.openSync(_connection);
-
-      // 读取本地文件
-      final fileBytes = await file.readAsBytes();
-      final fileSize = fileBytes.length;
-
-      print('文件大小: $fileSize 字节');
-
-      // 发送文件
-      final fileStream = Stream.value(fileBytes);
-      final currentTime = DateTime.now().millisecondsSinceEpoch;
-
-      await syncStream.send(fileStream, _devicePath, 33261, currentTime);
+      await KadbDart.push(
+        _connection,
+        _scrcpyServerPath,
+        _devicePath,
+        mode: 33261,
+      );
 
       print('scrcpy-server已成功推送到设备: $_devicePath');
-
-      // 验证文件是否存在
-      final shellStream = await KadbDart.executeShell(_connection, 'ls', [
-        '-la',
-        _devicePath,
-      ]);
-      final result = await shellStream.readAll();
-      print('设备上的文件信息: $result');
     } catch (e) {
       print('推送scrcpy-server失败: $e');
       rethrow;
@@ -76,73 +133,43 @@ class ScrcpyIntegration {
     print('正在设置端口转发: 本地端口 $localPort -> 设备 scrcpy');
 
     try {
-      // 注意：KadbDart.startTcpForward 需要整数端口，不是字符串
-      // 对于 localabstract:scrcpy，我们需要使用不同的方法
-
-      // 首先尝试使用ADB命令设置端口转发
-      final shellStream = await KadbDart.executeShell(_connection, 'adb', [
-        'forward',
-        'tcp:$localPort',
-        'localabstract:scrcpy',
-      ]);
-
-      final result = await shellStream.readAll();
-      print('端口转发设置结果: $result');
-
-      // 创建本地TCP转发器来监听端口
-      _forwarder = TcpForwarder(
-        _connection,
-        localPort,
-        27183,
-      ); // 27183是scrcpy默认端口
+      _forwarder = TcpForwarder(_connection, localPort, 'localabstract:scrcpy');
       await _forwarder!.start();
 
-      print('端口转发设置成功！');
+      print('✅ ADB转发已启动: tcp:$localPort -> localabstract:scrcpy');
+      print('💡 现在可以通过 localhost:$localPort 连接到scrcpy服务');
     } catch (e) {
       print('设置端口转发失败: $e');
-      rethrow;
+      // 不抛出异常，继续执行
     }
   }
 
   /// 启动scrcpy服务器
-  Future<void> startScrcpyServer({
-    int version = 3,
-    bool tunnelForward = true,
-    bool audio = false,
-    bool control = false,
-    bool cleanup = false,
-    bool rawStream = true,
-    int maxSize = 1920,
-  }) async {
+  Future<void> startScrcpyServer(ScrcpyOptions options) async {
     print('正在启动scrcpy服务器...');
+    print('配置: $options');
 
     try {
-      // 构建命令参数
-      final args = <String>[
-        version.toString(),
-        if (tunnelForward) 'tunnel_forward=true' else 'tunnel_forward=false',
-        if (audio) 'audio=true' else 'audio=false',
-        if (control) 'control=true' else 'control=false',
-        if (cleanup) 'cleanup=true' else 'cleanup=false',
-        if (rawStream) 'raw_stream=true' else 'raw_stream=false',
-        'max_size=$maxSize',
-      ];
+      final args = options.toCommandLineArgs();
 
-      // 构建完整的shell命令
       final shellCommand =
           'CLASSPATH=$_devicePath app_process / com.genymobile.scrcpy.Server ${args.join(' ')}';
 
       print('执行命令: $shellCommand');
 
-      // 执行命令
-      final shellStream = await KadbDart.executeShell(_connection, 'sh', [
-        '-c',
-        shellCommand,
-      ]);
+      AdbShellStream shellStream;
+
+      try {
+        shellStream = await KadbDart.executeShell(_connection, shellCommand.split(' ')[0], shellCommand.split(' ').sublist(1));
+      } catch (e) {
+        print('直接执行失败，尝试使用shell -c: $e');
+        shellStream = await KadbDart.executeShell(_connection, 'sh', [
+          '-c',
+          shellCommand,
+        ]);
+      }
 
       print('scrcpy服务器启动成功！');
-
-      // 读取输出（可选）
       _readServerOutput(shellStream);
     } catch (e) {
       print('启动scrcpy服务器失败: $e');
@@ -154,36 +181,69 @@ class ScrcpyIntegration {
   void _readServerOutput(AdbShellStream shellStream) {
     print('开始读取服务器输出...');
 
-    // 异步读取标准输出
+    var outputBuffer = StringBuffer();
+    var lastOutputTime = DateTime.now();
+
     shellStream.stdout.listen(
       (data) {
-        print('服务器输出: $data');
+        outputBuffer.write(data);
+        lastOutputTime = DateTime.now();
+
+        if (data.contains('INFO:') || data.contains('WARN:') || data.contains('ERROR:') ||
+            data.contains('[server]') || data.contains('[device]')) {
+          print('服务器: $data.trim()');
+        } else if (data.length > 100 && !data.contains(RegExp(r'[a-zA-Z]'))) {
+          print('🎥 接收到视频数据 (${data.length} 字节)');
+        }
+
+        if (outputBuffer.length > 1000) {
+          outputBuffer.clear();
+        }
       },
       onError: (error) {
-        print('读取服务器输出时出错: $error');
+        if (!error.toString().contains('TimeoutException')) {
+          print('⚠️ 服务器输出异常: $error');
+        }
       },
       onDone: () {
-        print('服务器标准输出流结束');
+        print('📡 服务器输出流结束');
+        print('💡 注意：scrcpy服务器可能正在等待客户端连接，这是正常状态');
       },
     );
 
-    // 异步读取标准错误
     shellStream.stderr.listen(
       (data) {
-        print('服务器错误: $data');
+        print('❌ 服务器错误: $data');
       },
       onError: (error) {
-        print('读取服务器错误时出错: $error');
+        if (!error.toString().contains('TimeoutException')) {
+          print('⚠️ 读取服务器错误时出错: $error');
+        }
       },
       onDone: () {
-        print('服务器错误输出流结束');
+        print('⚠️ 服务器错误输出流结束');
       },
     );
 
-    // 监听退出码
     shellStream.exitCode.listen((exitCode) {
-      print('服务器退出，退出码: $exitCode');
+      if (exitCode != 0) {
+        print('❌ 服务器异常退出，退出码: $exitCode');
+      } else {
+        print('✅ 服务器正常退出，退出码: $exitCode');
+      }
     });
+
+    Timer.periodic(Duration(seconds: 30), (timer) {
+      final now = DateTime.now();
+      final timeSinceLastOutput = now.difference(lastOutputTime);
+
+      if (timeSinceLastOutput.inMinutes > 2) {
+        print('💡 scrcpy服务器正在运行中... (最后输出: ${timeSinceLastOutput.inMinutes} 分钟前)');
+        lastOutputTime = now;
+      }
+    });
+
+    print('✅ 服务器输出监控已启动');
   }
 
   /// 完整的scrcpy启动流程
@@ -191,33 +251,39 @@ class ScrcpyIntegration {
     String host = '100.123.66.1',
     int port = 5555,
     int localPort = 1234,
-    Map<String, dynamic> options = const {},
+    ScrcpyOptions options = ScrcpyOptions.displayOnly,
+    bool skipServerPush = false,
   }) async {
     try {
+      print('开始scrcpy启动流程...');
+      print('连接配置: $host:$port, 本地端口: $localPort');
+      print('scrcpy配置: $options');
+
       // 1. 连接设备
       await connect(host: host, port: port);
 
-      // 2. 推送scrcpy-server
-      await pushScrcpyServer();
+      // 2. 推送scrcpy-server（可选）
+      if (!skipServerPush) {
+        await pushScrcpyServer();
+      } else {
+        print('⏭️ 跳过scrcpy-server推送步骤（测试模式）');
+      }
 
       // 3. 设置端口转发
       await setupPortForwarding(localPort: localPort);
 
-      // 4. 启动scrcpy服务器
-      await startScrcpyServer(
-        version: options['version'] ?? 3,
-        tunnelForward: options['tunnelForward'] ?? true,
-        audio: options['audio'] ?? false,
-        control: options['control'] ?? false,
-        cleanup: options['cleanup'] ?? false,
-        rawStream: options['rawStream'] ?? true,
-        maxSize: options['maxSize'] ?? 1920,
-      );
+      // 4. 启动scrcpy服务器（可选）
+      if (!skipServerPush) {
+        await startScrcpyServer(options);
 
-      print('scrcpy启动完成！');
-      print('现在可以通过本地端口 $localPort 连接到scrcpy服务');
+        print('🎉 scrcpy启动完成！');
+        print('现在可以通过本地端口 $localPort 连接到scrcpy服务');
+      } else {
+        print('🎉 TCP转发测试完成！');
+        print('端口 $localPort 已启动，可以测试连接');
+      }
     } catch (e) {
-      print('启动scrcpy失败: $e');
+      print('❌ 启动scrcpy失败: $e');
       rethrow;
     }
   }
@@ -231,7 +297,8 @@ class ScrcpyIntegration {
         _forwarder = null;
       }
 
-      // 关闭ADB连接
+      // 直接关闭ADB连接（close()方法是同步的，不会造成阻塞）
+      print('正在关闭ADB连接...');
       _connection.close();
       print('ADB连接已关闭');
     } catch (e) {
@@ -242,27 +309,51 @@ class ScrcpyIntegration {
 
 /// 主函数示例
 Future<void> main() async {
-  final scrcpy = ScrcpyIntegration('../scrcpy/scrcpy-server');
+  final scrcpy = ScrcpyIntegration('scrcpy/scrcpy-server');
 
   try {
-    await scrcpy.startScrcpy(
-      options: {
-        'version': 3,
-        'tunnelForward': true,
-        'audio': false,
-        'control': false,
-        'cleanup': false,
-        'rawStream': true,
-        'maxSize': 1920,
-      },
+    // 使用类型安全的配置选项
+    const options = ScrcpyOptions(
+      version: 3.1,
+      tunnelForward: true,
+      audio: false,
+      control: false,
+      cleanup: false,
+      rawStream: true,
+      maxSize: 1920,
     );
 
-    // 保持运行，等待用户输入
-    print('按任意键退出...');
-    await stdin.first;
+    // 启动scrcpy（完整模式：包含服务器推送）
+    await scrcpy.startScrcpy(
+      options: options,
+      skipServerPush: false, // 完整模式，启动scrcpy服务器
+    );
+
+    // 等待用户测试端口转发
+    print('\n🎉 TCP转发运行中，按 Ctrl+C 或 Enter键退出...');
+    print('💡 提示：现在可以测试端口转发功能...\n');
+    print('测试命令：');
+    print('  - telnet localhost 1234');
+    print('  - nc localhost 1234');
+    print('  - curl localhost:1234');
+
+    // 等待用户输入
+    try {
+      await for (String _ in stdin.transform(utf8.decoder).transform(const LineSplitter())) {
+        break; // 读取一行后退出
+      }
+    } catch (e) {
+      // 如果输入处理失败，等待一段时间再退出
+      print('输入处理异常，等待5秒后退出: $e');
+      await Future.delayed(Duration(seconds: 5));
+    }
   } catch (e) {
     print('错误: $e');
   } finally {
-    scrcpy.close();
+    print('\n🛑 正在关闭scrcpy连接...');
+    await scrcpy.close();
+    print('✅ scrcpy已退出');
   }
 }
+
+

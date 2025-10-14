@@ -136,11 +136,6 @@ class AdbShellStream {
     final type = data[0];
     final payload = data.sublist(1);
 
-    // 调试输出
-    if (_debug) {
-      print('调试: Shell数据类型=$type, 负载长度=${payload.length}, 内容="${utf8.decode(payload)}"');
-    }
-
     try {
       switch (type) {
         case 0: // stdin（通常不接收）
@@ -164,10 +159,11 @@ class AdbShellStream {
           }
           break;
         default:
-          print('警告：未知的Shell数据类型: $type');
+          // 忽略未知类型的数据
+          break;
       }
     } catch (e) {
-      print('处理Shell数据时出错: $e');
+      // 忽略处理数据时的错误
     }
   }
   

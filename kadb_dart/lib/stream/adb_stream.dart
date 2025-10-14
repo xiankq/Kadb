@@ -54,13 +54,14 @@ class AdbStream {
   final AdbWriter _adbWriter;
   final int _maxPayloadSize;
   final int _localId;
-  final int _remoteId;
-  
+  int _remoteId; // Make this mutable so it can be updated when the remote ID is assigned
+  final Completer<void> _remoteIdCompleter = Completer<void>();
+
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
   final StreamController<void> _closeController = StreamController<void>.broadcast();
-  
+
   bool _isClosed = false;
-  
+
   AdbStream({
     required int localId,
     required int remoteId,
@@ -69,13 +70,10 @@ class AdbStream {
     required AdbWriter writer,
     bool debug = false,
   })  : _localId = localId,
-        _remoteId = remoteId,
+        _remoteId = remoteId, // Initial remote ID is 0, will be updated after open
         _messageQueue = messageQueue,
         _adbWriter = writer,
         _maxPayloadSize = 1024 * 1024 { // 默认最大负载大小
-    if (debug) {
-      print('创建ADB流: localId=$localId, remoteId=$remoteId, destination=$destination');
-    }
     // 注册本地ID到消息队列
     _messageQueue.startListening(_localId);
     _startReading();
@@ -86,12 +84,21 @@ class AdbStream {
   
   /// 获取关闭流
   Stream<void> get closeStream => _closeController.stream;
-  
+
   /// 获取数据源
   AdbStreamSource get source => AdbStreamSourceImpl(this);
-  
+
   /// 获取数据接收器
   AdbStreamSink get sink => AdbStreamSinkImpl(this);
+
+  /// 等待远程ID分配
+  /// 当打开流后，设备会响应一个OKAY消息，其中包含远程ID
+  Future<void> waitForRemoteId() {
+    return _remoteIdCompleter.future;
+  }
+
+  /// 获取当前远程ID
+  int get remoteId => _remoteId;
   
   /// 写入数据到流
   /// [data] 要写入的数据
@@ -99,10 +106,16 @@ class AdbStream {
     if (_isClosed) {
       throw StateError('流已关闭');
     }
-    
+
     final chunks = _splitData(data);
-    for (final chunk in chunks) {
-      await _adbWriter.writeWrite(_localId, _remoteId, chunk, 0, chunk.length);
+
+    for (int i = 0; i < chunks.length; i++) {
+      final chunk = chunks[i];
+      try {
+        await _adbWriter.writeWrite(_localId, _remoteId, chunk, 0, chunk.length);
+      } catch (e) {
+        rethrow;
+      }
     }
   }
   
@@ -132,16 +145,19 @@ class AdbStream {
   
   /// 读取循环
   Future<void> _readLoop() async {
+    // First, wait for the OKAY message that assigns the remote ID
+    _waitForRemoteIdAssignment();
+
     while (!_isClosed) {
       try {
         // 使用消息队列读取WRTE消息
         final message = await _messageQueue.take(_localId, AdbProtocol.CMD_WRTE);
-        
+
         // 接收到数据
         if (message.payload.isNotEmpty) {
           _dataController.add(Uint8List.fromList(message.payload));
         }
-        
+
         // 发送确认
         await _adbWriter.writeOkay(_localId, _remoteId);
       } catch (e) {
@@ -162,6 +178,27 @@ class AdbStream {
       }
     }
   }
+
+  /// 等待远程ID分配
+  /// 当打开流后，设备会响应一个OKAY消息，其中包含远程ID
+  Future<void> _waitForRemoteIdAssignment() async {
+    try {
+      // 等待OKAY消息，它包含分配给此流的远程ID
+      final okayMessage = await _messageQueue.take(_localId, AdbProtocol.CMD_OKAY);
+      _remoteId = okayMessage.arg0; // arg0 contains the remote ID
+
+      // 完成远程ID等待
+      if (!_remoteIdCompleter.isCompleted) {
+        _remoteIdCompleter.complete();
+      }
+    } catch (e) {
+      // 如果发生错误，也完成Completer以避免永远等待
+      if (!_remoteIdCompleter.isCompleted) {
+        _remoteIdCompleter.completeError(e);
+      }
+      rethrow;
+    }
+  }
   
   /// 内部关闭方法
   Future<void> _close() async {
@@ -173,34 +210,22 @@ class AdbStream {
     }
   }
   
-  /// 内部数据源实现
-  AdbStreamSource _getSource() => AdbStreamSourceImpl(this);
-  
-  /// 内部数据接收器实现
-  AdbStreamSink _getSink() => AdbStreamSinkImpl(this);
-
-  /// 等待远程ID分配
-  Future<void> waitForRemoteId() async {
-    // 等待OPEN消息的响应
-    final response = await _messageQueue.take(_localId, AdbProtocol.CMD_OKAY);
-    // 注意：这里不能修改_remoteId，因为它是final字段
-    // 远程ID应该在构造函数中正确设置
-    // 这个方法主要用于同步等待远程端确认
-  }
-  
+    
   /// 分割数据为适合传输的块
   List<Uint8List> _splitData(Uint8List data) {
     final chunks = <Uint8List>[];
     var offset = 0;
-    
+
+    // 使用更小的块大小来避免socket写入问题
+    const int chunkSize = 32 * 1024; // 32KB而不是1MB
+
     while (offset < data.length) {
-      final chunkSize = data.length - offset > _maxPayloadSize 
-          ? _maxPayloadSize 
-          : data.length - offset;
-      chunks.add(data.sublist(offset, offset + chunkSize));
-      offset += chunkSize;
+      final remainingBytes = data.length - offset;
+      final actualChunkSize = remainingBytes > chunkSize ? chunkSize : remainingBytes;
+      chunks.add(data.sublist(offset, offset + actualChunkSize));
+      offset += actualChunkSize;
     }
-    
+
     return chunks;
   }
 }

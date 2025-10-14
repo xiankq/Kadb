@@ -84,11 +84,11 @@ class AdbConnection {
       final buffer = Uint8List(length);
       await _currentChannel.readExactly(buffer, ioTimeout);
       return buffer.toList();
-    });
+    }, debug: _debug);
 
     _writer = AdbWriter((List<int> data) async {
       await _currentChannel.write(Uint8List.fromList(data), ioTimeout);
-    });
+    }, debug: _debug);
 
     // 创建消息队列
     _messageQueue = AdbMessageQueue(reader);

@@ -45,6 +45,11 @@ class AdbMessageQueue {
       throw StateError('消息队列已关闭');
     }
 
+    // 检查是否还在监听该本地ID，如果不在监听，说明流已关闭
+    if (!_openStreams.contains(localId)) {
+      throw AdbStreamClosed(localId);
+    }
+
     final completer = Completer<AdbMessage>();
     var messageReceived = false;
 
@@ -142,7 +147,6 @@ class AdbMessageQueue {
         _messageController.add(message);
       } catch (e) {
         if (!_isClosed) {
-          print('读取消息错误: $e');
           // 短暂延迟后继续读取
           await Future.delayed(Duration(milliseconds: 100));
         }

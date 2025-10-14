@@ -28,10 +28,9 @@ class CertUtils {
       try {
         final privateKey = privateKeyFileObj.readAsStringSync();
         final keyPair = await fromPrivateKeyPem(privateKey);
-        print('✅ 使用已缓存的密钥对');
         return keyPair;
       } catch (e) {
-        print('⚠️ 缓存证书无效，重新生成: $e');
+        // 缓存证书无效，将重新生成
       }
     }
 
@@ -51,7 +50,6 @@ class CertUtils {
     final adbPublicKeyBytes = generateAdbPublicKeyBytes(keyPair);
     certificateFileObj.writeAsBytesSync(adbPublicKeyBytes);
 
-    print('🔑 生成新的密钥对并保存到文件缓存');
     return keyPair;
   }
 
@@ -252,12 +250,6 @@ class CertUtils {
         privateKeyParser.nextObject() as asn1.ASN1Sequence;
 
     // 解析RSA私钥参数
-    print('调试: 私钥序列元素数量=${privateKeySequence.elements.length}');
-    for (var i = 0; i < privateKeySequence.elements.length; i++) {
-      final element = privateKeySequence.elements[i];
-      print('调试: 私钥序列[$i]: ${element.runtimeType}');
-    }
-
     // 标准的RSA私钥序列结构: [version, modulus, publicExponent, privateExponent, prime1, prime2, ...]
     final modulus =
         (privateKeySequence.elements[1] as asn1.ASN1Integer).valueAsBigInteger;
@@ -269,8 +261,6 @@ class CertUtils {
         (privateKeySequence.elements[4] as asn1.ASN1Integer).valueAsBigInteger;
     final prime2 =
         (privateKeySequence.elements[5] as asn1.ASN1Integer).valueAsBigInteger;
-
-    print('调试: 使用解析的模数，跳过严格的模数验证');
 
     // 直接使用解析的参数构造私钥
     return _SimpleRSAPrivateKey(

@@ -8,8 +8,9 @@ import 'package:kadb_dart/core/adb_protocol.dart';
 /// 负责向数据目标写入ADB协议消息
 class AdbWriter {
   final Future<void> Function(List<int>) _writeBytes;
-  
-  AdbWriter(this._writeBytes);
+  final bool _debug;
+
+  AdbWriter(this._writeBytes, {bool debug = false}) : _debug = debug;
 
   /// 写入连接消息
   Future<void> writeConnect({
@@ -81,8 +82,9 @@ class AdbWriter {
         magic: command ^ 0xFFFFFFFF, // 正确的魔数计算
         payload: payload ?? <int>[],
       );
-
-      print('(${DateTime.now()}) > $message');
+      if (_debug) {
+        print('(${DateTime.now()}) > $message');
+      }
 
       final messageBytes = AdbProtocol.generateMessageWithOffset(
         command, arg0, arg1, payload, offset, length,

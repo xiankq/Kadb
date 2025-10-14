@@ -36,6 +36,8 @@ class TlsTransportChannel implements base.TransportChannel {
         port,
         onBadCertificate: (certificate) {
           // ADB允许自签名证书
+          // Note: This print is left as-is since it's important security information
+          // that should be visible during TLS connection debugging
           print('警告: 使用自签名证书: ${certificate.subject}');
           return true;
         },
