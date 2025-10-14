@@ -96,28 +96,64 @@ class AdbConnection {
 
   /// 处理认证流程
   Future<void> _handleAuthentication(String systemIdentity) async {
-    AdbMessage message;
+    try {
+      AdbMessage message;
 
-    while (true) {
-      message = await _messageQueue.next();
+      while (true) {
+        message = await _messageQueue.next();
 
-      switch (message.command) {
-        case AdbProtocol.cmdStls:
-          // 暂时不支持TLS升级
-          throw UnsupportedError('TLS升级功能暂未实现');
+        if (_debug) {
+          print('🔍 收到认证消息: ${_messageToString(message.command)}');
+        }
 
-        case AdbProtocol.CMD_AUTH:
-          // 直接处理认证流程
-          await _performAuthentication(message, systemIdentity);
-          return;
+        switch (message.command) {
+          case AdbProtocol.cmdStls:
+            // 暂时不支持TLS升级
+            throw UnsupportedError('TLS升级功能暂未实现');
 
-        case AdbProtocol.CMD_CNXN:
-          // 直接连接成功，无需认证
-          return;
+          case AdbProtocol.CMD_AUTH:
+            // 直接处理认证流程
+            await _performAuthentication(message, systemIdentity);
+            return;
 
-        default:
-          throw Exception('未知的连接消息: ${message.command}');
+          case AdbProtocol.CMD_CNXN:
+            // 直接连接成功，无需认证
+            if (_debug) {
+              print('✅ 连接成功，无需认证');
+            }
+            return;
+
+          default:
+            throw Exception('未知的连接消息: ${message.command}');
+        }
       }
+    } catch (e) {
+      if (_debug) {
+        print('❌ 认证流程失败: $e');
+      }
+      rethrow;
+    }
+  }
+
+  /// 将消息命令转换为字符串（用于调试）
+  String _messageToString(int command) {
+    switch (command) {
+      case AdbProtocol.cmdStls:
+        return 'STLS(TLS升级)';
+      case AdbProtocol.CMD_AUTH:
+        return 'AUTH(认证请求)';
+      case AdbProtocol.CMD_CNXN:
+        return 'CNXN(连接确认)';
+      case AdbProtocol.CMD_OPEN:
+        return 'OPEN(打开流)';
+      case AdbProtocol.CMD_OKAY:
+        return 'OKAY(确认)';
+      case AdbProtocol.CMD_WRTE:
+        return 'WRTE(写入数据)';
+      case AdbProtocol.CMD_CLSE:
+        return 'CLSE(关闭流)';
+      default:
+        return 'UNKNOWN(0x${command.toRadixString(16)})';
     }
   }
 
@@ -213,6 +249,14 @@ class AdbConnection {
 
     // 等待远程ID分配
     await stream.waitForRemoteId();
+
+    // 监听流关闭事件，自动清理
+    stream.closeStream.listen((_) {
+      _streams.remove(localId);
+      if (_debug) {
+        print('🔧 流 localId=$localId 已自动清理');
+      }
+    });
 
     return stream;
   }

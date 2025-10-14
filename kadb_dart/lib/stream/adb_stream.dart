@@ -162,18 +162,10 @@ class AdbStream {
         await _adbWriter.writeOkay(_localId, _remoteId);
       } catch (e) {
         if (!_isClosed) {
-          // 检查是否为CLSE消息导致的错误
-          try {
-            final closeMessage = await _messageQueue.take(_localId, AdbProtocol.CMD_CLSE);
-            if (closeMessage.arg1 == _localId) {
-              // 远程端关闭流
-              await _close();
-              break;
-            }
-          } catch (_) {
-            // 不是CLSE消息，重新抛出原始错误
-            rethrow;
-          }
+          // 按照Kotlin版本的方式：任何异常都直接关闭流
+          // CLSE命令已经在消息队列中被处理，不需要等待
+          await _close();
+          break;
         }
       }
     }

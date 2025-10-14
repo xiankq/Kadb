@@ -10,7 +10,7 @@ kotlin {
             jvmToolchain(21)
         }
     }
-
+kill
     androidTarget {
         kotlin {
             jvmToolchain(21)

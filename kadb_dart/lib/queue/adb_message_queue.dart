@@ -45,6 +45,8 @@ class AdbMessageQueue {
       throw StateError('消息队列已关闭');
     }
 
+    // 移除拦截机制，让所有正常的ADB流操作正常进行
+
     // 检查是否还在监听该本地ID，如果不在监听，说明流已关闭
     if (!_openStreams.contains(localId)) {
       throw AdbStreamClosed(localId);
@@ -53,12 +55,19 @@ class AdbMessageQueue {
     final completer = Completer<AdbMessage>();
     var messageReceived = false;
 
-    // 设置超时检查
-    final timeout = Duration(seconds: 10);
+    // 设置超时检查 - 根据命令类型调整超时时间
+    Duration timeout;
+    if (localId == 1 && command == 1163086915) {
+      // 特殊处理：对于localId=1的异常命令码，增加更长的超时时间
+      timeout = Duration(seconds: 120);
+    } else {
+      timeout = Duration(seconds: 30);
+    }
+
     final timer = Timer(timeout, () {
       if (!messageReceived) {
         completer.completeError(
-          TimeoutException('等待消息超时: localId=$localId, command=$command'),
+          TimeoutException('等待消息超时: localId=$localId, command=$command (0x${command.toRadixString(16).padLeft(8, '0')})'),
         );
       }
     });
@@ -78,6 +87,16 @@ class AdbMessageQueue {
 
       // 等待新消息
       final subscription = _messageController.stream.listen((message) {
+        // 检查是否是流关闭通知
+        if (message.command == 0xFFFFFFFF && message.arg1 == localId) {
+          if (!messageReceived) {
+            messageReceived = true;
+            completer.completeError(AdbStreamClosed(localId));
+          }
+          return;
+        }
+
+        // 正常消息处理
         if (_getLocalId(message) == localId && _getCommand(message) == command) {
           if (!messageReceived) {
             messageReceived = true;
@@ -124,15 +143,27 @@ class AdbMessageQueue {
     while (!_isClosed && _isReading) {
       try {
         final message = await _adbReader.readMessage();
-        
-        if (_isCloseCommand(message)) {
-          final localId = _getLocalId(message);
-          _openStreams.remove(localId);
-          continue;
-        }
-
         final localId = _getLocalId(message);
         final command = _getCommand(message);
+
+        // 按照Kotlin版本的方式处理CLSE命令：不加入队列，直接清理流
+        if (_isCloseCommand(message)) {
+          _openStreams.remove(localId);
+
+          // 通知所有等待的take()调用 - 让它们检查_openStreams状态
+          // 通过发送一个特殊事件来唤醒所有等待者
+          _messageController.add(AdbMessage(
+            command: 0xFFFFFFFF, // 特殊命令码表示流关闭
+            arg0: 0,
+            arg1: localId,
+            payloadLength: 0,
+            checksum: 0,
+            magic: 0,
+            payload: [],
+          ));
+
+          continue;
+        }
 
         // 如果该本地ID正在被监听，将消息加入队列
         if (_queues.containsKey(localId)) {
@@ -169,6 +200,17 @@ class AdbMessageQueue {
     return message.command == AdbProtocol.CMD_CLSE;
   }
 
+  /// 检查是否为有效的ADB命令码
+  bool _isValidCommand(int command) {
+    return command == AdbProtocol.CMD_AUTH ||
+           command == AdbProtocol.CMD_CNXN ||
+           command == AdbProtocol.CMD_OPEN ||
+           command == AdbProtocol.CMD_OKAY ||
+           command == AdbProtocol.CMD_CLSE ||
+           command == AdbProtocol.CMD_WRTE ||
+           command == AdbProtocol.CMD_STLS;
+  }
+
   /// 确保队列为空（用于测试）
   @Deprecated('仅用于测试')
   void ensureEmpty() {
@@ -180,7 +222,7 @@ class AdbMessageQueue {
     }
   }
 
-  /// 获取下一个消息（通用方法）
+  /// 获取下一个消息（通用方法）- 关键修复
   /// 返回下一个可用的ADB消息
   Future<AdbMessage> next() async {
     if (_isClosed) {
@@ -194,12 +236,12 @@ class AdbMessageQueue {
     final completer = Completer<AdbMessage>();
     bool isCompleted = false;
 
-    // 设置超时检查
-    final timeout = Duration(seconds: 30);
+    // 关键修复：增加超时时间，避免认证流程超时
+    final timeout = Duration(seconds: 60);
     final timer = Timer(timeout, () {
       if (!isCompleted) {
         isCompleted = true;
-        completer.completeError(TimeoutException('等待消息超时'));
+        completer.completeError(TimeoutException('认证流程等待消息超时'));
       }
     });
 
@@ -237,6 +279,7 @@ class AdbMessageQueue {
           completeWithError(StateError('消息流已关闭'));
         }
       },
+      cancelOnError: false, // 关键修复：错误时不取消订阅
     );
 
     try {
@@ -264,7 +307,69 @@ class AdbMessageQueue {
       }
       rethrow;
     } finally {
-      subscription.cancel();
+      if (!isCompleted) {
+        subscription.cancel();
+      }
+      timer.cancel();
+    }
+  }
+
+  /// 带超时的获取特定消息
+  /// [localId] 本地ID
+  /// [command] 命令类型
+  /// [timeout] 超时时间
+  /// 返回Future<AdbMessage>
+  Future<AdbMessage> takeWithTimeout(int localId, int command, {required Duration timeout}) async {
+    if (_isClosed) {
+      throw StateError('消息队列已关闭');
+    }
+
+    // 检查是否还在监听该本地ID，如果不在监听，说明流已关闭
+    if (!_openStreams.contains(localId)) {
+      throw AdbStreamClosed(localId);
+    }
+
+    final completer = Completer<AdbMessage>();
+    var messageReceived = false;
+
+    final timer = Timer(timeout, () {
+      if (!messageReceived) {
+        completer.completeError(
+          TimeoutException('等待消息超时: localId=$localId, command=$command (0x${command.toRadixString(16).padLeft(8, '0')})'),
+        );
+      }
+    });
+
+    try {
+      // 首先检查队列中是否有匹配的消息
+      final message = _poll(localId, command);
+      if (message != null) {
+        messageReceived = true;
+        timer.cancel();
+        return message;
+      }
+
+      // 如果没有匹配的消息，开始异步读取
+      if (!_isReading) {
+        _startReading();
+      }
+
+      // 等待新消息
+      final subscription = _messageController.stream.listen((message) {
+        if (_getLocalId(message) == localId && _getCommand(message) == command) {
+          if (!messageReceived) {
+            messageReceived = true;
+            timer.cancel();
+            completer.complete(message);
+          }
+        }
+      });
+
+      // 等待完成
+      final result = await completer.future;
+      await subscription.cancel();
+      return result;
+    } finally {
       timer.cancel();
     }
   }

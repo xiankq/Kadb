@@ -17,6 +17,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:kadb_dart/core/adb_connection.dart';
 import 'package:kadb_dart/stream/adb_stream.dart';
+import 'package:kadb_dart/exception/adb_stream_closed.dart';
 
 /// TCP转发器状态枚举
 enum TcpForwarderState {
@@ -104,25 +105,46 @@ class TcpForwarder {
       // 等待远程ID分配，确保流已正确建立
       await adbStream.waitForRemoteId();
 
-      // 在独立的Future中处理双向转发
-      final clientFuture = _handleClientForwarding(client, adbStream);
-      _clientFutures.add(clientFuture);
+      if (_debug) {
+        print('🔗 建立连接: ${client.remoteAddress.address}:${client.remotePort} -> $_destination');
+      }
 
-      // 连接完成时清理
-      clientFuture.then((_) {
-        _clientFutures.remove(clientFuture);
-      }).catchError((e) {
-        _clientFutures.remove(clientFuture);
-        if (_debug) {
-          print('TCP转发客户端连接错误: $e');
-        }
-        return null; // 返回null以匹配Future.then的类型
-      });
+      // 立即开始处理双向转发，不等待
+      unawaited(_handleClientForwarding(client, adbStream));
 
     } catch (e) {
       if (_debug) {
         print('TCP转发错误: $e');
+        print('目标服务: $_destination');
+        print('客户端地址: ${client.remoteAddress.address}:${client.remotePort}');
       }
+
+      // 提供更友好的错误信息
+      String errorMsg = e.toString();
+      if (errorMsg.contains('TimeoutException')) {
+        if (_destination.startsWith('localabstract:')) {
+          final serviceName = _destination.split(':')[1];
+          print('⚠️ 连接Android服务超时: $serviceName');
+          print('💡 可能的原因：');
+          print('   1. scrcpy服务未启动或正在启动中');
+          print('   2. 设备上没有安装scrcpy-server');
+          print('   3. 服务名称不正确');
+        } else if (_destination.startsWith('tcp:')) {
+          final port = _destination.split(':')[1];
+          print('⚠️ 连接设备TCP端口超时: $port');
+          print('💡 可能的原因：');
+          print('   1. 设备上该端口没有服务在监听');
+          print('   2. 防火墙阻止了连接');
+          print('   3. 网络连接问题');
+        }
+        print('💡 转发器继续运行，等待其他连接尝试...');
+        // 不重新抛出异常，继续运行转发器
+        return;
+      } else if (errorMsg.contains('AdbStreamClosed') || e is AdbStreamClosed) {
+        // 静默处理ADB流关闭，这是正常的连接断开
+        return;
+      }
+
       // 确保在出错时关闭客户端连接
       try {
         await client.close();
@@ -140,6 +162,11 @@ class TcpForwarder {
     }
   }
 
+  /// 不等待Future完成（类似Kotlin的线程执行）
+  void unawaited(Future<void> future) {
+    // 故意不等待future完成，模拟Kotlin的线程池执行
+  }
+
   /// 处理客户端数据转发
   Future<void> _handleClientForwarding(Socket client, AdbStream adbStream) async {
     try {
@@ -150,6 +177,15 @@ class TcpForwarder {
       // 等待任一方向的数据传输完成（任一方向断开则整个连接结束）
       await Future.any([clientToAdb, adbToClient]);
 
+    } catch (e) {
+      if (_debug) {
+        if (e is AdbStreamClosed) {
+          print('⚠️ 数据转发过程中ADB流关闭，这可能是正常的连接断开');
+        } else {
+          print('⚠️ 数据转发过程中发生错误: $e');
+        }
+      }
+      // 不重新抛出异常，继续执行清理逻辑
     } finally {
       // 清理资源
       try {
@@ -175,27 +211,46 @@ class TcpForwarder {
     }
   }
 
-  /// 从Socket转发数据到ADB流
+  /// 从Socket转发数据到ADB流（复刻Kotlin版本的固定缓冲区实现）
   Future<void> _forwardDataFromSocket(Socket source, AdbStreamSink sink) async {
     try {
-      await for (final data in source) {
-        await sink.writeBytes(data);
-        await sink.flush();
+      final socketStream = source.asBroadcastStream();
+      await for (final data in socketStream) {
+        // 分块处理数据，模拟Kotlin版本的256字节缓冲区
+        for (int i = 0; i < data.length; i += 256) {
+          final end = (i + 256 < data.length) ? i + 256 : data.length;
+          final chunk = data.sublist(i, end);
+
+          await sink.writeBytes(chunk);
+          await sink.flush();
+          if (_debug && chunk.length > 0) {
+            print('📤 Socket->ADB: 发送 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}');
+          }
+        }
       }
     } catch (e) {
-      // 连接断开，正常结束
+      // 连接断开，正常结束，静默处理
     }
   }
 
-  /// 从ADB流转发数据到Socket
+  /// 从ADB流转发数据到Socket（复刻Kotlin版本的固定缓冲区实现）
   Future<void> _forwardDataFromAdbStream(AdbStreamSource source, Socket sink) async {
     try {
       await for (final data in source.stream) {
-        sink.add(data);
-        await sink.flush();
+        // 分块处理数据，模拟Kotlin版本的256字节缓冲区
+        for (int i = 0; i < data.length; i += 256) {
+          final end = (i + 256 < data.length) ? i + 256 : data.length;
+          final chunk = data.sublist(i, end);
+
+          sink.add(chunk);
+          await sink.flush();
+          if (_debug && chunk.length > 0) {
+            print('📥 ADB->Socket: 接收 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}');
+          }
+        }
       }
     } catch (e) {
-      // 连接断开，正常结束
+      // 连接断开，正常结束，静默处理
     }
   }
 

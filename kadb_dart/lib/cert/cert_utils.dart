@@ -30,6 +30,7 @@ class CertUtils {
         final keyPair = await fromPrivateKeyPem(privateKey);
         return keyPair;
       } catch (e) {
+        print('❌ 缓存文件无效，将重新生成...');
         // 缓存证书无效，将重新生成
       }
     }
@@ -155,7 +156,7 @@ class CertUtils {
   static String generateSystemIdentity({
     String? userName,
     String? hostName,
-    String softwareName = ''
+    String softwareName = '',
   }) {
     // 如果用户提供了用户名和主机名，直接使用
     if (userName != null && hostName != null) {
@@ -165,22 +166,28 @@ class CertUtils {
     // 否则尝试获取系统信息
     try {
       // 获取真实的用户名和主机名
-      final resolvedUserName = userName ??
-          (Process.runSync('whoami', [], runInShell: true).stdout as String).trim();
+      final resolvedUserName =
+          userName ??
+          (Process.runSync('whoami', [], runInShell: true).stdout as String)
+              .trim();
 
-      final resolvedHostName = hostName ??
-          (Process.runSync('hostname', [], runInShell: true).stdout as String).trim();
+      final resolvedHostName =
+          hostName ??
+          (Process.runSync('hostname', [], runInShell: true).stdout as String)
+              .trim();
 
       return '$resolvedUserName@$resolvedHostName';
     } catch (e) {
       // 如果系统命令失败，回退到环境变量或默认值
-      final finalUserName = userName ??
+      final finalUserName =
+          userName ??
           Platform.environment['USER'] ??
           Platform.environment['USERNAME'] ??
           Platform.environment['LOGNAME'] ??
           'user';
 
-      final finalHostName = hostName ??
+      final finalHostName =
+          hostName ??
           Platform.environment['COMPUTERNAME'] ??
           Platform.environment['HOSTNAME'] ??
           Platform.environment['HOST'] ??
