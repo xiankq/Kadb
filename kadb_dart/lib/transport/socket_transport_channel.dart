@@ -101,24 +101,38 @@ class SocketTransportChannel implements base.TransportChannel {
   @override
   Future<int> write(Uint8List data, Duration timeout) async {
     if (_socket == null || !_isConnected) {
-      throw Exception('通道未连接');
+      // 如果连接已关闭，返回0而不是抛出异常
+      return 0;
     }
-    
+
     final completer = Completer<int>();
     final timer = Timer(timeout, () {
-      completer.completeError(TimeoutException('写入超时'));
+      if (!completer.isCompleted) {
+        completer.completeError(TimeoutException('写入超时'));
+      }
     });
-    
+
     try {
       _socket!.add(data);
       await _socket!.flush();
       timer.cancel();
-      completer.complete(data.length);
+      if (!completer.isCompleted) {
+        completer.complete(data.length);
+      }
     } catch (e) {
       timer.cancel();
-      completer.completeError(e);
+      // 对于连接关闭的异常，返回0而不是抛出异常
+      if (e.toString().contains('Connection closed') ||
+          e.toString().contains('Socket closed') ||
+          e.toString().contains('Bad state')) {
+        if (!completer.isCompleted) {
+          completer.complete(0);
+        }
+      } else if (!completer.isCompleted) {
+        completer.completeError(e);
+      }
     }
-    
+
     return completer.future;
   }
 
@@ -158,8 +172,21 @@ class SocketTransportChannel implements base.TransportChannel {
   @override
   Future<void> close() async {
     _isConnected = false;
-    _socket?.destroy();
-    _socket = null;
+    try {
+      _socket?.destroy();
+    } catch (e) {
+      // 忽略关闭时的异常，这是正常的
+      if (e.toString().contains('Connection closed') ||
+          e.toString().contains('Socket closed') ||
+          e.toString().contains('通道未连接')) {
+        // 这些是正常的关闭异常，忽略
+      } else {
+        // 其他异常仍然抛出
+        rethrow;
+      }
+    } finally {
+      _socket = null;
+    }
   }
 
   @override

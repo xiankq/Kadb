@@ -121,7 +121,7 @@ class AdbSyncStream {
 
     // 写入远程路径
     final remoteBytes = remote.codeUnits;
-    await _stream.sink.add(remoteBytes);
+    await _stream.sink.writeBytes(remoteBytes);
     await _stream.sink.flush();
 
     _buffer.clear();
@@ -131,6 +131,7 @@ class AdbSyncStream {
       _buffer.addAll(chunk);
       await _writePacket(AdbSyncStreamConstants.data, chunk.length);
       await _stream.sink.writeBytes(chunk);
+      await _stream.sink.flush();
     }
 
     // 发送完成标记
@@ -138,17 +139,21 @@ class AdbSyncStream {
     await _writePacket(AdbSyncStreamConstants.done, lastModifiedSec);
     await _stream.sink.flush();
 
-    // 读取响应
-    final packet = await _readPacket();
-    switch (packet.id) {
-      case AdbSyncStreamConstants.okay:
-        return;
-      case AdbSyncStreamConstants.fail:
-        final messageBytes = await _stream.source.take(packet.arg);
-        final message = String.fromCharCodes(messageBytes);
-        throw Exception("同步失败: $message");
-      default:
-        throw Exception("意外的同步数据包ID: ${packet.id}");
+    // 读取响应，但设置超时
+    try {
+      final packet = await _readPacketWithTimeout(Duration(seconds: 30));
+      switch (packet.id) {
+        case AdbSyncStreamConstants.okay:
+          return;
+        case AdbSyncStreamConstants.fail:
+          final messageBytes = await _stream.source.take(packet.arg);
+          final message = String.fromCharCodes(messageBytes);
+          throw Exception("同步失败: $message");
+        default:
+          throw Exception("意外的同步数据包ID: ${packet.id}");
+      }
+    } catch (e) {
+      throw Exception("等待同步响应超时: $e");
     }
   }
 
@@ -207,11 +212,18 @@ class AdbSyncStream {
   Future<SyncPacket> _readPacket() async {
     final idBytes = await _stream.source.take(4);
     final id = String.fromCharCodes(idBytes);
-    
+
     final argBytes = await _stream.source.take(4);
     final arg = argBytes[0] | (argBytes[1] << 8) | (argBytes[2] << 16) | (argBytes[3] << 24);
-    
+
     return SyncPacket(id, arg);
+  }
+
+  /// 带超时的读取数据包
+  Future<SyncPacket> _readPacketWithTimeout(Duration timeout) async {
+    return await _readPacket().timeout(timeout, onTimeout: () {
+      throw TimeoutException('读取同步数据包超时', timeout);
+    });
   }
 
   /// 关闭同步流

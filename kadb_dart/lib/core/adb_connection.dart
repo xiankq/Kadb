@@ -228,12 +228,26 @@ class AdbConnection {
   void close() {
     if (!_closed) {
       _closed = true;
-      _messageQueue.close();
-      _currentChannel.close();
+
+      try {
+        _messageQueue.close();
+      } catch (e) {
+        // 忽略消息队列关闭时的异常
+      }
+
+      try {
+        _currentChannel.close();
+      } catch (e) {
+        // 忽略通道关闭时的异常
+      }
 
       // 关闭所有打开的流
       for (final stream in _streams.values) {
-        stream.close();
+        try {
+          stream.close();
+        } catch (e) {
+          // 忽略流关闭时的异常
+        }
       }
       _streams.clear();
     }

@@ -68,26 +68,38 @@ class AdbWriter {
   Future<void> write(
     int command, int arg0, int arg1, List<int>? payload, int offset, int length,
   ) async {
-    // 计算校验和
-    final checksum = payload != null ? _payloadChecksum(payload.sublist(offset, offset + length)) : 0;
-    
-    final message = AdbMessage(
-      command: command,
-      arg0: arg0,
-      arg1: arg1,
-      payloadLength: length,
-      checksum: checksum,
-      magic: command ^ 0xFFFFFFFF, // 正确的魔数计算
-      payload: payload ?? <int>[],
-    );
-    
-    print('(${DateTime.now()}) > $message');
-    
-    final messageBytes = AdbProtocol.generateMessageWithOffset(
-      command, arg0, arg1, payload, offset, length,
-    );
-    
-    await _writeBytes(messageBytes);
+    try {
+      // 计算校验和
+      final checksum = payload != null ? _payloadChecksum(payload.sublist(offset, offset + length)) : 0;
+
+      final message = AdbMessage(
+        command: command,
+        arg0: arg0,
+        arg1: arg1,
+        payloadLength: length,
+        checksum: checksum,
+        magic: command ^ 0xFFFFFFFF, // 正确的魔数计算
+        payload: payload ?? <int>[],
+      );
+
+      print('(${DateTime.now()}) > $message');
+
+      final messageBytes = AdbProtocol.generateMessageWithOffset(
+        command, arg0, arg1, payload, offset, length,
+      );
+
+      await _writeBytes(messageBytes);
+    } catch (e) {
+      // 对于连接关闭的异常，静默处理而不是抛出
+      if (e.toString().contains('通道未连接') ||
+          e.toString().contains('Connection closed') ||
+          e.toString().contains('Socket closed')) {
+        // 这是正常的关闭过程，不需要抛出异常
+        return;
+      }
+      // 其他异常仍然抛出
+      rethrow;
+    }
   }
 
   /// 计算负载数据的校验和

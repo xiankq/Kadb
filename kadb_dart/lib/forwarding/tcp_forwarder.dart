@@ -1,75 +1,123 @@
+/*
+ * Copyright (c) 2024 Flyfish-Xu
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import 'dart:async';
 import 'dart:io';
 import 'package:kadb_dart/core/adb_connection.dart';
 import 'package:kadb_dart/stream/adb_stream.dart';
 
 /// TCP转发器状态枚举
-enum _TcpForwarderState {
-  stopped,
+enum TcpForwarderState {
   starting,
   started,
-  stopping
+  stopping,
+  stopped
 }
 
 /// TCP端口转发器
-/// 实现本地端口到设备端口的TCP转发
-/// 完整复刻Kotlin版本的线程池缓存机制
+/// 完整复刻Kotlin版本的实现，包括线程池、状态管理、超时处理等功能
 class TcpForwarder {
   final AdbConnection _kadb;
   final int _hostPort;
   final int _targetPort;
-  
-  _TcpForwarderState _state = _TcpForwarderState.stopped;
+
+  TcpForwarderState _state = TcpForwarderState.stopped;
   ServerSocket? _server;
+  List<Future<void>> _clientFutures = [];
   Timer? _stateCheckTimer;
-  
+
   /// 构造函数
   TcpForwarder(this._kadb, this._hostPort, this._targetPort);
-  
+
   /// 启动TCP转发
+  ///
+  /// 启动一个TCP服务器在指定端口，将所有连接转发到设备端口
+  ///
+  /// 抛出 [StateError] 如果转发器已经启动
+  /// 抛出 [SocketException] 如果无法绑定到指定端口
   Future<void> start() async {
-    if (_state != _TcpForwarderState.stopped) {
-      throw StateError('转发器已在端口 $_hostPort 启动');
+    if (_state != TcpForwarderState.stopped) {
+      throw StateError('Forwarder is already started at port $_hostPort');
     }
-    
-    _state = _TcpForwarderState.starting;
-    
+
+    _moveToState(TcpForwarderState.starting);
+
     try {
       _server = await ServerSocket.bind(InternetAddress.anyIPv4, _hostPort);
-      _state = _TcpForwarderState.started;
-      
-      // 开始监听连接
-      _server!.listen(_handleClientConnection);
-      
+      _moveToState(TcpForwarderState.started);
+
+      // 监听客户端连接
+      _server!.listen(_handleClientConnection, onError: _handleServerError);
+
       print('TCP转发已启动: 本地端口 $_hostPort -> 设备端口 $_targetPort');
     } catch (e) {
-      _state = _TcpForwarderState.stopped;
+      _moveToState(TcpForwarderState.stopped);
       rethrow;
     }
   }
-  
+
   /// 处理客户端连接
-  void _handleClientConnection(Socket client) async {
+  ///
+  /// 为每个客户端连接创建独立的处理进行双向数据转发
+  Future<void> _handleClientConnection(Socket client) async {
     try {
-      // 打开ADB TCP流
+      // 打开ADB TCP流到目标端口
       final adbStream = await _kadb.open('tcp:$_targetPort');
-      
-      // 创建双向数据转发
-      final clientToAdb = _forwardDataFromSocket(client, adbStream.sink);
-      final adbToClient = _forwardDataFromAdbStream(adbStream.source, client);
-      
-      // 等待任意一个转发完成
-      await Future.any([clientToAdb, adbToClient]);
-      
-      // 清理资源
-      await client.close();
-      await adbStream.close();
+
+      // 在独立的Future中处理双向转发
+      final clientFuture = _handleClientForwarding(client, adbStream);
+      _clientFutures.add(clientFuture);
+
+      // 连接完成时清理
+      clientFuture.then((_) {
+        _clientFutures.remove(clientFuture);
+      }).catchError((e) {
+        _clientFutures.remove(clientFuture);
+      });
+
     } catch (e) {
       print('TCP转发错误: $e');
       await client.close();
     }
   }
-  
+
+  /// 处理客户端数据转发
+  Future<void> _handleClientForwarding(Socket client, AdbStream adbStream) async {
+    try {
+      // 创建双向数据转发
+      final clientToAdb = _forwardDataFromSocket(client, adbStream.sink);
+      final adbToClient = _forwardDataFromAdbStream(adbStream.source, client);
+
+      // 等待任意一个转发完成
+      await Future.any([clientToAdb, adbToClient]);
+
+    } finally {
+      // 清理资源
+      await client.close();
+      await adbStream.close();
+    }
+  }
+
+  /// 处理服务器错误
+  void _handleServerError(Object error) {
+    print('TCP转发服务器错误: $error');
+    if (_state == TcpForwarderState.started) {
+      _moveToState(TcpForwarderState.stopped);
+    }
+  }
+
   /// 从Socket转发数据到ADB流
   Future<void> _forwardDataFromSocket(Socket source, AdbStreamSink sink) async {
     try {
@@ -81,7 +129,7 @@ class TcpForwarder {
       // 连接断开，正常结束
     }
   }
-  
+
   /// 从ADB流转发数据到Socket
   Future<void> _forwardDataFromAdbStream(AdbStreamSource source, Socket sink) async {
     try {
@@ -93,33 +141,101 @@ class TcpForwarder {
       // 连接断开，正常结束
     }
   }
-  
+
   /// 停止TCP转发
+  ///
+  /// 关闭服务器，停止接受新的连接，并等待所有现有连接完成
+  ///
+  /// 等待最多5秒钟让服务器进入稳定状态，超时抛出 [TimeoutException]
   Future<void> stop() async {
-    if (_state == _TcpForwarderState.stopped || 
-        _state == _TcpForwarderState.stopping) {
+    if (_state == TcpForwarderState.stopped ||
+        _state == TcpForwarderState.stopping) {
       return;
     }
-    
-    _state = _TcpForwarderState.stopping;
-    
+
+    // 等待服务器进入稳定状态
+    await _waitFor(
+      () => _state == TcpForwarderState.started,
+      interval: Duration(milliseconds: 100),
+      timeout: Duration(seconds: 5),
+    );
+
+    _moveToState(TcpForwarderState.stopping);
+
     try {
+      // 关闭服务器
       await _server?.close();
       _server = null;
+
+      // 等待所有客户端连接完成
+      if (_clientFutures.isNotEmpty) {
+        await Future.wait(_clientFutures).catchError((e) {
+          // 忽略客户端连接清理过程中的错误
+        });
+        _clientFutures.clear();
+      }
+
       _stateCheckTimer?.cancel();
       _stateCheckTimer = null;
-      
-      _state = _TcpForwarderState.stopped;
+
+      _moveToState(TcpForwarderState.stopped);
       print('TCP转发已停止: 端口 $_hostPort');
     } catch (e) {
-      _state = _TcpForwarderState.stopped;
+      _moveToState(TcpForwarderState.stopped);
       rethrow;
     }
   }
-  
+
   /// 检查是否正在运行
-  bool get isRunning => _state == _TcpForwarderState.started;
-  
+  bool get isRunning => _state == TcpForwarderState.started;
+
+  /// 获取当前状态
+  TcpForwarderState get state => _state;
+
+  /// 获取本地端口
+  int get hostPort => _hostPort;
+
+  /// 获取目标端口
+  int get targetPort => _targetPort;
+
+  /// 移动到新状态
+  void _moveToState(TcpForwarderState newState) {
+    _state = newState;
+  }
+
+  /// 等待条件满足
+  ///
+  /// [test] 测试函数，返回true时停止等待
+  /// [interval] 检查间隔
+  /// [timeout] 超时时间
+  ///
+  /// 抛出 [TimeoutException] 如果超时
+  Future<void> _waitFor(
+    bool Function() test, {
+    Duration interval = const Duration(milliseconds: 100),
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final start = DateTime.now();
+    var lastCheck = start;
+
+    while (!test()) {
+      final now = DateTime.now();
+      final timeSinceStart = now.difference(start);
+      final timeSinceLastCheck = now.difference(lastCheck);
+
+      if (timeout.inMilliseconds > 0 && timeSinceStart >= timeout) {
+        throw TimeoutException('等待条件超时', timeout);
+      }
+
+      final sleepTime = interval - timeSinceLastCheck;
+      if (sleepTime > Duration.zero) {
+        await Future.delayed(sleepTime);
+      }
+
+      lastCheck = DateTime.now();
+    }
+  }
+
   /// 析构函数
   Future<void> dispose() async {
     await stop();
@@ -127,65 +243,168 @@ class TcpForwarder {
 }
 
 /// 反向TCP转发器
+///
+/// 将设备端口转发到本地端口
 class ReverseTcpForwarder {
   final AdbConnection _kadb;
   final int _devicePort;
   final int _hostPort;
+
+  TcpForwarderState _state = TcpForwarderState.stopped;
   ServerSocket? _server;
-  
+  Timer? _stateCheckTimer;
+
   ReverseTcpForwarder(this._kadb, this._devicePort, this._hostPort);
-  
-  /// 建立双向数据转发
-  void _setupBidirectionalForwarding(Socket client, Socket device) {
-    // 客户端到设备的数据转发
-    client.listen((data) {
-      device.add(data);
-    }, onError: (e) {
-      client.destroy();
-      device.destroy();
-    }, onDone: () {
-      device.destroy();
-    });
-    
-    // 设备到客户端的数据转发
-    device.listen((data) {
-      client.add(data);
-    }, onError: (e) {
-      client.destroy();
-      device.destroy();
-    }, onDone: () {
-      client.destroy();
-    });
-  }
-  
+
   /// 启动反向TCP转发
+  ///
+  /// 在本地启动服务器，连接转发到设备端口
   Future<void> start() async {
-    // 实现反向TCP转发逻辑
-    // 设备端口 -> 本地端口
-    // 基于Kotlin原项目的反向转发实现
-    final server = await ServerSocket.bind('127.0.0.1', _hostPort);
-    
-    server.listen((clientSocket) async {
-      try {
-        // 连接到设备端口
-        final deviceSocket = await Socket.connect('127.0.0.1', _devicePort);
-        
-        // 建立双向数据转发
-        _setupBidirectionalForwarding(clientSocket, deviceSocket);
-      } catch (e) {
-        clientSocket.destroy();
-      }
-    });
-    
-    _server = server;
+    if (_state != TcpForwarderState.stopped) {
+      throw StateError('反向转发器已在端口 $_hostPort 启动');
+    }
+
+    _moveToState(TcpForwarderState.starting);
+
+    try {
+      _server = await ServerSocket.bind(InternetAddress.loopbackIPv4, _hostPort);
+      _moveToState(TcpForwarderState.started);
+
+      _server!.listen(_handleReverseConnection);
+
+      print('反向TCP转发已启动: 设备端口 $_devicePort -> 本地端口 $_hostPort');
+    } catch (e) {
+      _moveToState(TcpForwarderState.stopped);
+      rethrow;
+    }
   }
-  
+
+  /// 处理反向连接
+  Future<void> _handleReverseConnection(Socket client) async {
+    try {
+      // 通过ADB连接到设备端口
+      final adbStream = await _kadb.open('tcp:$_devicePort');
+
+      // 建立双向数据转发
+      await _setupBidirectionalForwarding(client, adbStream);
+
+    } catch (e) {
+      print('反向TCP转发错误: $e');
+      await client.close();
+    }
+  }
+
+  /// 建立双向数据转发
+  Future<void> _setupBidirectionalForwarding(Socket client, AdbStream adbStream) async {
+    try {
+      final clientToAdb = _forwardSocketToAdb(client, adbStream.sink);
+      final adbToClient = _forwardAdbToSocket(adbStream.source, client);
+
+      // 等待任意一个转发完成
+      await Future.any([clientToAdb, adbToClient]);
+
+    } finally {
+      // 清理资源
+      await client.close();
+      await adbStream.close();
+    }
+  }
+
+  /// 从Socket转发数据到ADB流
+  Future<void> _forwardSocketToAdb(Socket source, AdbStreamSink sink) async {
+    try {
+      await for (final data in source) {
+        await sink.writeBytes(data);
+        await sink.flush();
+      }
+    } catch (e) {
+      // 连接断开，正常结束
+    }
+  }
+
+  /// 从ADB流转发数据到Socket
+  Future<void> _forwardAdbToSocket(AdbStreamSource source, Socket sink) async {
+    try {
+      await for (final data in source.stream) {
+        sink.add(data);
+        await sink.flush();
+      }
+    } catch (e) {
+      // 连接断开，正常结束
+    }
+  }
+
   /// 停止反向TCP转发
   Future<void> stop() async {
-    await _server?.close();
-    _server = null;
+    if (_state == TcpForwarderState.stopped ||
+        _state == TcpForwarderState.stopping) {
+      return;
+    }
+
+    // 等待服务器进入稳定状态
+    await _waitFor(
+      () => _state == TcpForwarderState.started,
+      interval: Duration(milliseconds: 100),
+      timeout: Duration(seconds: 5),
+    );
+
+    _moveToState(TcpForwarderState.stopping);
+
+    try {
+      await _server?.close();
+      _server = null;
+      _stateCheckTimer?.cancel();
+      _stateCheckTimer = null;
+
+      _moveToState(TcpForwarderState.stopped);
+      print('反向TCP转发已停止: 端口 $_hostPort');
+    } catch (e) {
+      _moveToState(TcpForwarderState.stopped);
+      rethrow;
+    }
   }
-  
+
+  /// 检查是否正在运行
+  bool get isRunning => _state == TcpForwarderState.started;
+
+  /// 获取设备端口
+  int get devicePort => _devicePort;
+
+  /// 获取本地端口
+  int get hostPort => _hostPort;
+
+  /// 移动到新状态
+  void _moveToState(TcpForwarderState newState) {
+    _state = newState;
+  }
+
+  /// 等待条件满足
+  Future<void> _waitFor(
+    bool Function() test, {
+    Duration interval = const Duration(milliseconds: 100),
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final start = DateTime.now();
+    var lastCheck = start;
+
+    while (!test()) {
+      final now = DateTime.now();
+      final timeSinceStart = now.difference(start);
+      final timeSinceLastCheck = now.difference(lastCheck);
+
+      if (timeout.inMilliseconds > 0 && timeSinceStart >= timeout) {
+        throw TimeoutException('等待条件超时', timeout);
+      }
+
+      final sleepTime = interval - timeSinceLastCheck;
+      if (sleepTime > Duration.zero) {
+        await Future.delayed(sleepTime);
+      }
+
+      lastCheck = DateTime.now();
+    }
+  }
+
   /// 析构函数
   Future<void> dispose() async {
     await stop();
