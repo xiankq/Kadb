@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:kadb_dart/core/adb_message.dart';
 import 'package:kadb_dart/core/adb_protocol.dart';
+import 'package:kadb_dart/debug/logging.dart';
 
 /// ADB消息读取器
 /// 负责从数据源读取ADB协议消息
@@ -43,8 +44,9 @@ class AdbReader {
       payload: payload,
     );
 
+    // 只在详细模式下显示消息读取，避免过度打印
     if (_debug) {
-      print('(${DateTime.now()}) < $message');
+      Logging.verbose('(${DateTime.now()}) < $message');
     }
 
     return message;

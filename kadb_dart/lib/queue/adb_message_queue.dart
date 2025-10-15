@@ -6,6 +6,7 @@ import 'package:kadb_dart/core/adb_message.dart';
 import 'package:kadb_dart/core/adb_protocol.dart';
 import 'package:kadb_dart/core/adb_reader.dart';
 import 'package:kadb_dart/exception/adb_stream_closed.dart';
+import 'package:kadb_dart/debug/logging.dart';
 
 /// ADB消息队列
 /// 管理ADB消息的异步读取和分发
@@ -26,14 +27,16 @@ class AdbMessageQueue {
     if (_isClosed) {
       throw StateError('消息队列已关闭');
     }
-    print('🔍 ADB消息队列: 开始监听本地ID 0x${localId.toRadixString(16)}');
+    // 只在详细模式下显示队列监听信息，避免过度打印
+    Logging.verbose('ADB消息队列: 开始监听本地ID 0x${localId.toRadixString(16)}');
     _openStreams.add(localId);
     _queues[localId] = {};
   }
 
   /// 停止监听特定本地ID的消息
   void stopListening(int localId) {
-    print('🔍 ADB消息队列: 停止监听本地ID 0x${localId.toRadixString(16)}');
+    // 只在详细模式下显示队列监听信息，避免过度打印
+    Logging.verbose('ADB消息队列: 停止监听本地ID 0x${localId.toRadixString(16)}');
     _openStreams.remove(localId);
     _queues.remove(localId);
   }
@@ -51,11 +54,11 @@ class AdbMessageQueue {
 
     // 检查是否还在监听该本地ID，如果不在监听，说明流已关闭
     if (!_openStreams.contains(localId)) {
-      print('🔍 ADB消息队列: 本地ID 0x${localId.toRadixString(16)} 不在监听列表中，当前监听的ID: ${_openStreams.map((id) => '0x${id.toRadixString(16)}').join(', ')}');
+      Logging.verbose('ADB消息队列: 本地ID 0x${localId.toRadixString(16)} 不在监听列表中');
       
       // 修复：对于某些特殊情况，尝试重新添加到监听列表而不是立即抛出异常
       if (localId >= 4) { // 对于ID >= 4的流，可能是临时创建的测试流
-        print('🔍 尝试重新添加本地ID 0x${localId.toRadixString(16)} 到监听列表');
+        Logging.verbose('尝试重新添加本地ID 0x${localId.toRadixString(16)} 到监听列表');
         _openStreams.add(localId);
         if (!_queues.containsKey(localId)) {
           _queues[localId] = {};
@@ -136,11 +139,11 @@ class AdbMessageQueue {
 
     final message = streamQueues[command]?.removeFirst();
     if (message == null && !_openStreams.contains(localId)) {
-      print('🔍 ADB消息队列: _poll中本地ID 0x${localId.toRadixString(16)} 不在监听列表中');
+      Logging.verbose('ADB消息队列: _poll中本地ID 0x${localId.toRadixString(16)} 不在监听列表中');
       
       // 修复：对于某些特殊情况，尝试重新添加到监听列表而不是立即抛出异常
       if (localId >= 4) { // 对于ID >= 4的流，可能是临时创建的测试流
-        print('🔍 _poll中尝试重新添加本地ID 0x${localId.toRadixString(16)} 到监听列表');
+        Logging.verbose('_poll中尝试重新添加本地ID 0x${localId.toRadixString(16)} 到监听列表');
         _openStreams.add(localId);
         return null; // 返回null让上层继续处理
       } else {

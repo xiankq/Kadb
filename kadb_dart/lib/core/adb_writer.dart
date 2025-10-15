@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:kadb_dart/core/adb_message.dart';
 import 'package:kadb_dart/core/adb_protocol.dart';
+import 'package:kadb_dart/debug/logging.dart';
 
 /// ADB消息写入器
 /// 负责向数据目标写入ADB协议消息
@@ -82,8 +83,9 @@ class AdbWriter {
         magic: command ^ 0xFFFFFFFF, // 正确的魔数计算
         payload: payload ?? <int>[],
       );
+      // 只在详细模式下显示消息写入，避免过度打印
       if (_debug) {
-        print('(${DateTime.now()}) > $message');
+        Logging.verbose('(${DateTime.now()}) > $message');
       }
 
       final messageBytes = AdbProtocol.generateMessageWithOffset(

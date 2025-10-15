@@ -1,8 +1,17 @@
 import 'dart:io';
 import 'package:kadb_dart/kadb_dart.dart';
+import 'package:kadb_dart/debug/logging.dart';
 
 void main() async {
-  print('🚀 启动最小化scrcpy服务器...');
+  // 设置调试级别：false=仅关键信息，true=标准调试，verbose=true=详细调试
+  const bool debugMode = false;
+  const bool verboseMode = false;
+  
+  // 初始化日志系统
+  Logging.setDebug(debugMode);
+  Logging.setVerbose(verboseMode);
+
+  Logging.status('启动scrcpy服务器...');
 
   late AdbConnection connection;
   TcpForwarder? forwarder;

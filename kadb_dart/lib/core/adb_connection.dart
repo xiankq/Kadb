@@ -10,6 +10,7 @@ import 'package:kadb_dart/queue/adb_message_queue.dart';
 import 'package:kadb_dart/stream/adb_stream.dart';
 import 'package:kadb_dart/transport/transport_channel.dart' as base;
 import 'package:kadb_dart/transport/socket_transport_channel.dart';
+import 'package:kadb_dart/debug/logging.dart';
 
 /// ADB连接类
 /// 负责ADB协议的连接管理和流操作
@@ -47,6 +48,8 @@ class AdbConnection {
       throw StateError('连接已关闭');
     }
 
+    Logging.status('正在连接到 $host:$port...');
+
     // 建立网络连接
     await _establishConnection(host, port);
 
@@ -58,6 +61,8 @@ class AdbConnection {
     // 系统ADB发送的payload是 'host::用户@主机名\u0000'，总长度25字节
     final connectPayload = 'host::$systemIdentity\u0000';
 
+    Logging.verbose('发送连接请求: $connectPayload');
+
     await _writer.writeConnect(
       version: AdbProtocol.version,
       maxData: AdbProtocol.maxPayload,
@@ -67,9 +72,7 @@ class AdbConnection {
     // 处理认证流程
     await _handleAuthentication(systemIdentity);
 
-    if (_debug) {
-      print('✅ ADB连接成功建立');
-    }
+    Logging.status('ADB连接成功建立');
   }
 
   /// 建立网络连接
@@ -102,35 +105,32 @@ class AdbConnection {
       while (true) {
         message = await _messageQueue.next();
 
-        if (_debug) {
-          print('🔍 收到认证消息: ${_messageToString(message.command)}');
-        }
+        Logging.verbose('收到认证消息: ${_messageToString(message.command)}');
 
         switch (message.command) {
           case AdbProtocol.cmdStls:
             // 暂时不支持TLS升级
+            Logging.error('TLS升级功能暂未实现');
             throw UnsupportedError('TLS升级功能暂未实现');
 
           case AdbProtocol.CMD_AUTH:
             // 直接处理认证流程
+            Logging.status('开始认证流程...');
             await _performAuthentication(message, systemIdentity);
             return;
 
           case AdbProtocol.CMD_CNXN:
             // 直接连接成功，无需认证
-            if (_debug) {
-              print('✅ 连接成功，无需认证');
-            }
+            Logging.status('连接成功，无需认证');
             return;
 
           default:
+            Logging.error('未知的连接消息: ${message.command}');
             throw Exception('未知的连接消息: ${message.command}');
         }
       }
     } catch (e) {
-      if (_debug) {
-        print('❌ 认证流程失败: $e');
-      }
+      Logging.error('认证流程失败: $e');
       rethrow;
     }
   }
@@ -195,17 +195,15 @@ class AdbConnection {
     }
 
     // 签名认证失败，尝试公钥认证
-    if (_debug) {
-      print('🔑 签名认证失败，尝试公钥认证...');
-    }
+    Logging.warning('签名认证失败，尝试公钥认证...');
 
     final publicKeyData = CertUtils.generateAuthFormatPublicKey(_keyPair, systemIdentity);
 
+    Logging.verbose('发送公钥认证，长度: ${publicKeyData.length}');
     if (_debug) {
-      print('📤 发送公钥认证，长度: ${publicKeyData.length}');
       final publicKeyString = String.fromCharCodes(publicKeyData);
-      print('📤 公钥内容: $publicKeyString');
-      print('📤 公钥长度分析: Base64=${publicKeyString.split(' ')[0].length}, 标识符="${publicKeyString.split(' ')[1]}"');
+      Logging.verbose('公钥内容: $publicKeyString');
+      Logging.verbose('公钥长度分析: Base64=${publicKeyString.split(' ')[0].length}, 标识符="${publicKeyString.split(' ')[1]}"');
     }
 
     // 发送公钥认证请求
@@ -215,12 +213,11 @@ class AdbConnection {
     final finalMessage = await _messageQueue.next();
 
     if (finalMessage.command == AdbProtocol.CMD_CNXN) {
-      if (_debug) {
-        print('✅ 公钥认证成功');
-      }
+      Logging.status('公钥认证成功');
       return;
     }
 
+    Logging.error('认证失败: 期望CNXN消息，收到命令: 0x${finalMessage.command.toRadixString(16)}');
     throw Exception('认证失败: 期望CNXN消息，收到命令: 0x${finalMessage.command.toRadixString(16)}');
   }
 
