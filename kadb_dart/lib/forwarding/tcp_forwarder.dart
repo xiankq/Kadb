@@ -103,7 +103,14 @@ class TcpForwarder {
       adbStream = await _kadb.open(_destination);
 
       // 等待远程ID分配，确保流已正确建立
-      await adbStream.waitForRemoteId();
+      try {
+        await adbStream.waitForRemoteId().timeout(Duration(seconds: 5));
+      } catch (e) {
+        if (_debug) {
+          print('⚠️ 等待远程ID分配失败: $e');
+        }
+        // 继续尝试，不立即关闭连接
+      }
 
       if (_debug) {
         print('🔗 建立连接: ${client.remoteAddress.address}:${client.remotePort} -> $_destination');
@@ -211,18 +218,22 @@ class TcpForwarder {
     }
   }
 
-  /// 从Socket转发数据到ADB流（复刻Kotlin版本的固定缓冲区实现）
+  /// 从Socket转发数据到ADB流（优化缓冲区大小，提升视频流性能）
   Future<void> _forwardDataFromSocket(Socket source, AdbStreamSink sink) async {
     try {
       final socketStream = source.asBroadcastStream();
       await for (final data in socketStream) {
-        // 分块处理数据，模拟Kotlin版本的256字节缓冲区
-        for (int i = 0; i < data.length; i += 256) {
-          final end = (i + 256 < data.length) ? i + 256 : data.length;
+        // 优化：使用64KB缓冲区，减少flush调用频率
+        const int bufferSize = 64 * 1024; // 64KB
+        for (int i = 0; i < data.length; i += bufferSize) {
+          final end = (i + bufferSize < data.length) ? i + bufferSize : data.length;
           final chunk = data.sublist(i, end);
 
           await sink.writeBytes(chunk);
-          await sink.flush();
+          // 只在数据块末尾flush，减少系统调用
+          if (end == data.length) {
+            await sink.flush();
+          }
           if (_debug && chunk.length > 0) {
             print('📤 Socket->ADB: 发送 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}');
           }
@@ -233,17 +244,21 @@ class TcpForwarder {
     }
   }
 
-  /// 从ADB流转发数据到Socket（复刻Kotlin版本的固定缓冲区实现）
+  /// 从ADB流转发数据到Socket（优化缓冲区大小，提升视频流性能）
   Future<void> _forwardDataFromAdbStream(AdbStreamSource source, Socket sink) async {
     try {
       await for (final data in source.stream) {
-        // 分块处理数据，模拟Kotlin版本的256字节缓冲区
-        for (int i = 0; i < data.length; i += 256) {
-          final end = (i + 256 < data.length) ? i + 256 : data.length;
+        // 优化：使用64KB缓冲区，减少flush调用频率
+        const int bufferSize = 64 * 1024; // 64KB
+        for (int i = 0; i < data.length; i += bufferSize) {
+          final end = (i + bufferSize < data.length) ? i + bufferSize : data.length;
           final chunk = data.sublist(i, end);
 
           sink.add(chunk);
-          await sink.flush();
+          // 只在数据块末尾flush，减少系统调用
+          if (end == data.length) {
+            await sink.flush();
+          }
           if (_debug && chunk.length > 0) {
             print('📥 ADB->Socket: 接收 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}');
           }

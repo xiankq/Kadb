@@ -162,10 +162,15 @@ class AdbStream {
         await _adbWriter.writeOkay(_localId, _remoteId);
       } catch (e) {
         if (!_isClosed) {
-          // 按照Kotlin版本的方式：任何异常都直接关闭流
-          // CLSE命令已经在消息队列中被处理，不需要等待
-          await _close();
-          break;
+          // 只有在是真正的流关闭异常时才关闭流
+          // 其他异常可能是暂时的网络问题，不应该立即关闭流
+          if (e.toString().contains('AdbStreamClosed') || e.toString().contains('CLSE')) {
+            await _close();
+            break;
+          } else {
+            // 其他异常暂时忽略，继续尝试读取
+            await Future.delayed(Duration(milliseconds: 100));
+          }
         }
       }
     }
@@ -208,8 +213,8 @@ class AdbStream {
     final chunks = <Uint8List>[];
     var offset = 0;
 
-    // 使用更小的块大小来避免socket写入问题
-    const int chunkSize = 32 * 1024; // 32KB而不是1MB
+    // 优化：增大块大小到128KB，提升视频流传输性能
+    const int chunkSize = 128 * 1024; // 128KB
 
     while (offset < data.length) {
       final remainingBytes = data.length - offset;

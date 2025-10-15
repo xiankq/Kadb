@@ -66,22 +66,20 @@ class SocketTransportChannel implements base.TransportChannel {
     
     var totalRead = 0;
     while (totalRead < buffer.length) {
-      // 如果缓冲区有足够数据，直接读取
+      // 如果缓冲区有足够数据，批量读取
       if (_readBuffer.length >= buffer.length - totalRead) {
         final bytesToRead = buffer.length - totalRead;
-        for (int i = 0; i < bytesToRead; i++) {
-          buffer[totalRead + i] = _readBuffer.removeAt(0);
-        }
+        buffer.setRange(totalRead, totalRead + bytesToRead, _readBuffer, 0);
+        _readBuffer.removeRange(0, bytesToRead);
         totalRead += bytesToRead;
         continue;
       }
       
-      // 如果缓冲区数据不足，等待更多数据
+      // 如果缓冲区数据不足，批量读取可用数据
       if (_readBuffer.isNotEmpty) {
         final bytesToRead = _readBuffer.length;
-        for (int i = 0; i < bytesToRead; i++) {
-          buffer[totalRead + i] = _readBuffer.removeAt(0);
-        }
+        buffer.setRange(totalRead, totalRead + bytesToRead, _readBuffer, 0);
+        _readBuffer.removeRange(0, bytesToRead);
         totalRead += bytesToRead;
       }
       
