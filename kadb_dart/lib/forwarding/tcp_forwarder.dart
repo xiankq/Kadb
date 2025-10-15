@@ -234,7 +234,7 @@ class TcpForwarder {
           if (end == data.length) {
             await sink.flush();
           }
-          if (_debug && chunk.length > 0) {
+          if (_debug && chunk.isNotEmpty) {
             print('📤 Socket->ADB: 发送 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}');
           }
         }
@@ -259,7 +259,7 @@ class TcpForwarder {
           if (end == data.length) {
             await sink.flush();
           }
-          if (_debug && chunk.length > 0) {
+          if (_debug && chunk.isNotEmpty) {
             print('📥 ADB->Socket: 接收 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}');
           }
         }

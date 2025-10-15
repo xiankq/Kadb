@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:kadb_dart/kadb_dart.dart';
 import 'package:kadb_dart/debug/logging.dart';
 
@@ -6,7 +5,7 @@ void main() async {
   // 设置调试级别：false=仅关键信息，true=标准调试，verbose=true=详细调试
   const bool debugMode = false;
   const bool verboseMode = false;
-  
+
   // 初始化日志系统
   Logging.setDebug(debugMode);
   Logging.setVerbose(verboseMode);
@@ -22,8 +21,8 @@ void main() async {
     final keyPair = await CertUtils.loadKeyPair();
 
     connection = await KadbDart.create(
-      host: '192.168.2.148',
-      port: 5555,
+      host: '192.168.2.32',
+      port: 5556,
       keyPair: keyPair,
       debug: false,
       ioTimeoutMs: 30000,

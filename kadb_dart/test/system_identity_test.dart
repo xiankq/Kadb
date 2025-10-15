@@ -1,42 +1,31 @@
 import 'package:kadb_dart/kadb_dart.dart';
 
+/// 系统身份标识生成测试
 void main() {
-  print('=== 测试系统身份标识生成 ===\n');
-
-  // 测试1: 默认参数
-  print('1. 测试默认参数:');
+  // 测试默认参数
   final defaultIdentity = CertUtils.generateSystemIdentity();
-  print('   默认身份: $defaultIdentity\n');
+  assert(defaultIdentity.contains('@'), '默认身份应包含@符号');
 
-  // 测试2: 自定义用户名和主机名
-  print('2. 测试自定义参数:');
+  // 测试自定义参数
   final customIdentity = CertUtils.generateSystemIdentity(
     userName: 'customuser',
     hostName: 'customhost'
   );
-  print('   自定义身份: $customIdentity\n');
+  assert(customIdentity == 'customuser@customhost', '自定义身份格式应正确');
 
-  // 测试3: 只提供用户名
-  print('3. 测试只提供用户名:');
+  // 测试部分参数
   final userOnlyIdentity = CertUtils.generateSystemIdentity(
     userName: 'testuser',
     hostName: null
   );
-  print('   仅用户名: $userOnlyIdentity\n');
+  assert(userOnlyIdentity.contains('@'), '仅用户名时应生成完整身份');
 
-  // 测试4: 只提供主机名
-  print('4. 测试只提供主机名:');
   final hostOnlyIdentity = CertUtils.generateSystemIdentity(
     userName: null,
     hostName: 'testhost'
   );
-  print('   仅主机名: $hostOnlyIdentity\n');
+  assert(hostOnlyIdentity.contains('@'), '仅主机名时应生成完整身份');
 
-  // 测试5: 验证格式
-  print('5. 验证格式:');
-  print('   默认格式正确: ${defaultIdentity.contains('@')}');
-  print('   自定义格式正确: ${customIdentity.contains('@')}');
-  print('   预期值匹配: ${customIdentity == 'customuser@customhost'}\n');
-
-  print('✅ 系统身份标识生成测试完成');
+  // 测试通过
+  print('系统身份标识生成测试通过');
 }
