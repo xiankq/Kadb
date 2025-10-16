@@ -38,6 +38,7 @@ dependencies:
   media_kit_video: ^1.2.1
   media_kit_libs_video: ^1.0.7
   path_provider: ^2.1.1
+  provider: ^6.1.1
   # 将kadb_dart作为本地依赖添加
   kadb_dart:
     path: ../

@@ -1,5 +1,5 @@
-import '../lib/kadb_dart.dart';
-import '../lib/debug/logging.dart';
+import 'package:kadb_dart/kadb_dart.dart';
+import 'package:kadb_dart/debug/logging.dart';
 
 void main() async {
   // 设置调试级别：false=仅关键信息，true=标准调试，verbose=true=详细调试
@@ -12,7 +12,7 @@ void main() async {
 
   Logging.status('启动scrcpy服务器...');
 
-  late AdbConnection connection;
+  AdbConnection? connection;
   TcpForwarder? forwarder;
 
   try {
@@ -35,9 +35,9 @@ void main() async {
     print('正在推送scrcpy-server到设备...');
     await KadbDart.push(
       connection,
-      './scrcpy/scrcpy-server',
+      'assets/scrcpy-server',
       '/data/local/tmp/scrcpy-server.jar',
-      mode: 33261,
+      mode: 33261, // 0o100645 in decimal
     );
     print('✅ scrcpy-server已推送');
 
@@ -55,18 +55,25 @@ void main() async {
     // 4. 启动scrcpy服务器
     print('正在启动scrcpy服务器...');
     final shellCommand =
-        'CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server 3.3.3 tunnel_forward=true audio=false control=false cleanup=false raw_stream=true max_size=720';
+        'CLASSPATH=/data/local/tmp/scrcpy-server.jar ' +
+        'app_process / com.genymobile.scrcpy.Server 3.3.3 ' +
+        'tunnel_forward=true audio=false control=false cleanup=false raw_stream=true max_size=720';
 
-    final shellStream = await KadbDart.executeShell(connection, 'sh', [
-      '-c',
-      shellCommand,
-    ]);
+    final shellStream = await KadbDart.executeShell(
+      connection,
+      'sh',
+      args: ['-c', shellCommand],
+    );
 
     print('✅ scrcpy服务器已启动');
 
     // 5. 等待服务器启动
     print('⏳ 等待scrcpy服务器完全启动...');
     await Future.delayed(Duration(seconds: 5));
+
+    // 保持shell流的引用，因为scrcpy服务器需要它保持运行
+    // 不要关闭shellStream，因为这会终止scrcpy服务器
+    print('💡 shell流保持打开以维持scrcpy服务器运行');
 
     // 6. 显示使用说明
     print('\n🎉 scrcpy服务器启动完成！');
@@ -100,7 +107,9 @@ void main() async {
     }
 
     try {
-      connection.close();
+      if (connection != null && !connection.isClosed) {
+        connection.close();
+      }
     } catch (e) {
       print('⚠️ 关闭连接时出错: $e');
     }

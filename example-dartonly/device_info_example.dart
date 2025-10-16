@@ -2,7 +2,7 @@
 library;
 
 import 'dart:async';
-import '../lib/kadb_dart.dart';
+import 'package:kadb_dart/kadb_dart.dart';
 
 void main() async {
   final host = '192.168.2.32';
@@ -25,9 +25,11 @@ void main() async {
 
 Future<void> _getDeviceModel(AdbConnection connection) async {
   try {
-    final shellStream = await KadbDart.executeShell(connection, 'getprop', [
-      'ro.product.model',
-    ]);
+    final shellStream = await KadbDart.executeShell(
+      connection,
+      'getprop',
+      args: ['ro.product.model'],
+    );
 
     String deviceModel = '';
     shellStream.stdout.listen((data) {

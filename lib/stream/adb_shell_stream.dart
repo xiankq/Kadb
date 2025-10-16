@@ -111,18 +111,28 @@ class AdbShellStream {
 
   /// 开始读取Shell输出
   void _startReading() {
+    if (_debug) {
+      print('ADB Shell: 开始读取输出...');
+    }
+
     _adbStream.dataStream.listen(
       (data) {
         _processShellData(data);
       },
       onError: (error) {
         if (!_isClosed) {
+          if (_debug) {
+            print('ADB Shell Error: $error');
+          }
           _stdoutController.addError(error);
           _stderrController.addError(error);
           _close();
         }
       },
       onDone: () {
+        if (_debug) {
+          print('ADB Shell: 输出流结束');
+        }
         if (!_isClosed) {
           _close();
         }
@@ -156,6 +166,11 @@ class AdbShellStream {
           final cleaned = decoded
               .replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '')
               .trim();
+
+          if (_debug && cleaned.isNotEmpty) {
+            print('ADB Shell STDOUT: $cleaned');
+          }
+
           _stdoutController.add(cleaned);
           break;
         case 2: // stderr
@@ -163,11 +178,19 @@ class AdbShellStream {
           final cleaned = decoded
               .replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '')
               .trim();
+
+          if (_debug && cleaned.isNotEmpty) {
+            print('ADB Shell STDERR: $cleaned');
+          }
+
           _stderrController.add(cleaned);
           break;
         case 3: // exit code
           if (payload.isNotEmpty) {
             final exitCode = payload[0]; // exit code是单个字节
+            if (_debug) {
+              print('ADB Shell Exit Code: $exitCode');
+            }
             _exitCodeController.add(exitCode);
           }
           break;

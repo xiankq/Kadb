@@ -96,17 +96,17 @@ class KadbDart {
     );
   }
 
-  /// 执行Shell命令
+  /// 执行Shell命令（原始流方法）
   /// [connection] ADB连接
   /// [command] Shell命令
   /// [args] 命令参数
   /// [debug] 是否启用调试模式
   static Future<AdbShellStream> executeShell(
     AdbConnection connection,
-    String command, [
+    String command, {
     List<String> args = const [],
     bool debug = false,
-  ]) async {
+  }) async {
     return AdbShellStream.execute(connection, command, args, debug);
   }
 
@@ -244,7 +244,12 @@ class KadbDart {
 
     final syncStream = await openSync(connection);
 
-    await syncStream.send(fileStream, remotePath, mode, currentTime.millisecondsSinceEpoch);
+    await syncStream.send(
+      fileStream,
+      remotePath,
+      mode,
+      currentTime.millisecondsSinceEpoch,
+    );
   }
 
   /// 推送文件流到设备
@@ -337,7 +342,13 @@ class KadbDart {
     final fileSize = await apkFile.length();
     final fileBytes = await apkFile.readAsBytes();
 
-    final commandArgs = ['package', 'install', '-S', fileSize.toString(), ...options];
+    final commandArgs = [
+      'package',
+      'install',
+      '-S',
+      fileSize.toString(),
+      ...options,
+    ];
     final command = commandArgs.join(' ');
 
     // 创建exec流并写入APK数据
@@ -403,10 +414,14 @@ class KadbDart {
     }
 
     // 计算总大小
-    final totalSize = files.fold<int>(0, (sum, file) => sum + file.lengthSync());
+    final totalSize = files.fold<int>(
+      0,
+      (sum, file) => sum + file.lengthSync(),
+    );
 
     // 创建安装会话
-    final sessionCommand = 'pm install-create -S $totalSize ${options.join(' ')}';
+    final sessionCommand =
+        'pm install-create -S $totalSize ${options.join(' ')}';
     final shellStream = await executeShell(connection, sessionCommand);
     final sessionResponse = await shellStream.readAll();
 
@@ -422,7 +437,8 @@ class KadbDart {
         await push(connection, file.path, remotePath);
 
         // 写入到会话
-        final writeCommand = 'pm install-write -S ${file.lengthSync()} $sessionId $i "$remotePath"';
+        final writeCommand =
+            'pm install-write -S ${file.lengthSync()} $sessionId $i "$remotePath"';
         final writeStream = await executeShell(connection, writeCommand);
         final writeResult = await writeStream.readAll();
 
@@ -439,7 +455,6 @@ class KadbDart {
       if (!commitResult.contains('Success')) {
         throw Exception('APK安装提交失败: $commitResult');
       }
-
     } catch (e) {
       // 如果出错，放弃安装会话
       try {

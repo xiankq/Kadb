@@ -4,38 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Kadb is a Kotlin Multiplatform library that enables connecting to Android devices without requiring the ADB server. It supports wireless debugging, APK installation, file management, port forwarding, and shell command execution. The project also includes a Dart implementation (`kadb_dart`) and a Compose Desktop test application. The project is located in the `kadb-kt/` directory, and the Dart implementation is in the root directory as `lib/` with related files.
+Kadb is a library that enables connecting to Android devices without requiring the ADB server. Originally a Kotlin Multiplatform library (now deleted), the project now focuses on the Dart implementation (`kadb_dart`). It supports wireless debugging, APK installation, file management, port forwarding, and shell command execution. The primary codebase is the Dart implementation in `lib/`, with a complete Flutter scrcpy example application in `example/`.
 
 ## Repository Structure
 
-- `kadb-kt/` - Main Kotlin Multiplatform library
-  - `src/commonMain/kotlin/` - Shared Kotlin code
-  - `src/androidMain/kotlin/` - Android-specific implementations
-  - `src/jvmMain/kotlin/` - JVM-specific implementations
-- `kadb-kt/kadb-test-app/` - Compose Desktop test application
-- `lib/` - Dart implementation of the ADB protocol (in root directory)
+- `kadb-kt/` - Main Kotlin Multiplatform library (DELETED - now only Dart implementation)
+- `lib/` - Dart implementation of the ADB protocol (primary codebase)
+  - Core implementation in `lib/kadb_dart.dart` and supporting modules
+- `example/` - Flutter scrcpy application demonstrating kadb_dart usage
+  - Complete Flutter app with Android/iOS support
+  - Uses media_kit for video playback
+  - Includes local kadb_dart dependency
+- `example-dartonly/` - Pure Dart example files (moved from root example/)
+- `test/` - Dart test files for the kadb_dart package
 - `adbDocumentation/` - ADB protocol documentation
-- `scrcpy/` - Related scrcpy integration code
-- `example/` - Example Dart files demonstrating usage
+- `assets/scrcpy-server` - Scrcpy server binary
 
 ## Build Commands
 
-### Kotlin Multiplatform Library
-```bash
-# Build all targets
-./kadb-kt/gradlew build
-
-# Run tests
-./kadb-kt/gradlew test
-
-# Publish to Maven Local
-./kadb-kt/gradlew publishToMavenLocal
-
-# Build specific target
-./kadb-kt/gradlew :kadb:build
-```
-
-### Dart Package (in root directory)
+### Dart Package (Primary Implementation)
 ```bash
 # Get dependencies
 dart pub get
@@ -46,94 +33,112 @@ dart test
 # Analyze code
 dart analyze
 
-# Run example
-dart run example/scrcpy_server.dart
+# Run Dart-only examples
+dart run example-dartonly/scrcpy_server.dart
+dart run example-dartonly/device_info_example.dart
 ```
 
-### Test Application
+### Flutter Example Application
 ```bash
-# Run the Compose Desktop test app
-./kadb-kt/gradlew :kadb-test-app:run
+# Navigate to example directory
+cd example
 
-# Build native distributions
-./kadb-kt/gradlew :kadb-test-app:createDistributable
+# Get Flutter dependencies
+flutter pub get
+
+# Run the Flutter app
+flutter run
+
+# Build for release
+flutter build apk --release
+flutter build ios --release
+
+# Analyze Flutter code
+flutter analyze
+```
+
+### Single Test Commands
+```bash
+# Run specific test file
+dart test test/specific_test_file.dart
+
+# Run tests with coverage
+dart test --coverage
 ```
 
 ## Architecture
 
 ### Core Components
 
-**Kotlin Multiplatform Library (`kadb-kt/`)**
-- `AdbConnection` - Main connection management
-- `AdbProtocol` - ADB protocol implementation
-- `TransportChannel` - Abstraction for different transport mechanisms
-- `AdbMessageQueue` - Message queuing and handling
-- `PairingConnectionCtx` - Wireless pairing implementation
-- `TcpForwarder` - Port forwarding functionality
-- `AdbShellStream` - Shell command execution
-- `AdbSyncStream` - File transfer operations
-
 **Dart Implementation (`lib/`)**
-- Similar architecture to Kotlin version
-- `AdbConnection` - Connection management
-- `TransportChannel` - Transport layer abstraction
-- `AdbMessageQueue` - Message handling
-- `PairingConnectionCtx` - Device pairing
-- `TcpForwarder` - Port forwarding
-- `AdbShellStream` - Shell operations
+- `AdbConnection` - Main connection management (lib/kadb_dart.dart:45)
+- `TransportChannel` - Abstraction for different transport mechanisms (lib/transport/)
+- `AdbMessageQueue` - Message queuing and handling (lib/queue/)
+- `PairingConnectionCtx` - Wireless pairing implementation (lib/pair/)
+- `TcpForwarder` - Port forwarding functionality (lib/forwarding/tcp_forwarder.dart)
+- `AdbShellStream` - Shell command execution (lib/shell/shell_stream.dart)
+- `AdbSyncStream` - File transfer operations (lib/stream/sync_stream.dart)
 - Core implementation in `lib/kadb_dart.dart` and supporting modules in subdirectories
 
 ### Architecture Modules (Dart Implementation)
 
 **Dart Implementation (`lib/`)**
-- `/auth` - Authentication implementations
-- `/cert` - Certificate management
-- `/core` - Core connection management
-- `/debug` - Debugging utilities
-- `/exception` - Exception classes
-- `/forwarding` - Port forwarding functionality
-- `/pair` - Device pairing mechanisms
-- `/queue` - Message queue management
-- `/shell` - Shell command execution
-- `/stream` - Data stream handling
-- `/tls` - TLS/SSL implementations
-- `/transport` - Transport channel implementations
+- `auth/` - Authentication implementations (RSA certificate-based auth)
+- `cert/` - Certificate and key management for ADB authentication
+- `core/` - Core connection management and protocol constants
+- `debug/` - Debugging utilities and logging
+- `exception/` - Custom exception classes for ADB protocol errors
+- `forwarding/` - Port forwarding functionality (TCP/UDP forwarding)
+- `pair/` - Device pairing mechanisms (wireless ADB pairing)
+- `queue/` - Message queue management for protocol command handling
+- `shell/` - Shell command execution and stream management
+- `stream/` - Data stream handling (sync, file, video streams)
+- `tls/` - TLS/SSL implementations for secure connections
+- `transport/` - Transport channel implementations (USB, network, socket)
 
-### Platform-Specific Implementations
+### Key Implementation Details
 
-**Android Target:**
-- Uses `DocumentFile` for file operations
-- Includes `HiddenApiBypass` for Android Q compatibility
-- Platform-specific device name detection
+**Authentication Flow:**
+- RSA key generation and certificate management (lib/cert/)
+- Certificate-based authentication with Android devices
+- Support for both paired and unpaired connection modes
 
-**JVM Target:**
-- Uses jmDNS for device discovery
-- Conscrypt for SSL/TLS support
-- NIO-based transport channels
+**Connection Management:**
+- Automatic device discovery and connection establishment
+- Robust error handling and reconnection logic
+- Support for multiple simultaneous connections
+
+**Protocol Implementation:**
+- Complete ADB protocol implementation in pure Dart
+- Binary message encoding/decoding (lib/kadb_dart.dart:892)
+- Command and response handling through message queue
 
 ## Development Workflow
 
-1. **Kotlin Development**: Use `./kadb-kt/gradlew build` to compile all targets
-2. **Testing**: Run `./kadb-kt/gradlew test` for Kotlin, `dart test` for Dart
-3. **Code Quality**: Both projects use linting (`kotlin.code.style=official` for Kotlin, `lints` package for Dart)
-4. **Pairing Implementation**: Note that device pairing currently has limitations on JVM target
+1. **Dart Development**: Use `dart pub get` to install dependencies, `dart analyze` for code quality
+2. **Testing**: Run `dart test` for unit tests, `flutter test` for Flutter example app
+3. **Code Quality**: Uses `lints` package for Dart code quality enforcement
+4. **Flutter Testing**: Use `flutter test` in `example/` directory for Flutter app tests
 
 ## Key Dependencies
 
-**Kotlin:**
-- `kotlinx.coroutines.core` - Coroutines support
-- `okio` - I/O operations
-- `bcprov`/`bcpkix` - Cryptographic operations
-- `spake2` - Authentication protocol
+**Dart Core Package:**
+- `pointycastle: ^4.0.0` - Cryptographic operations (RSA, TLS)
+- `crypto: ^3.0.3` - Crypto utilities and hashing
+- `asn1lib: ^1.0.0` - ASN.1 parsing for certificates
+- `typed_data: ^1.3.2` - Utility for working with typed binary data
+- `path: ^1.9.0` - Path manipulation utilities
 
-**Dart:**
-- `pointycastle` - Cryptographic operations
-- `crypto` - Crypto utilities
-- `asn1lib` - ASN.1 parsing
-- `typed_data` - Utility for working with typed data
+**Flutter Example App:**
+- `media_kit: ^1.2.1` - Video playback for scrcpy streaming
+- `media_kit_video: ^1.2.1` - Video widget support
+- `media_kit_libs_video: ^1.0.7` - Native video libraries
+- `path_provider: ^2.1.1` - File system access
+- `kadb_dart` (local dependency) - Core ADB functionality
 
 ## Testing
 
-- Kotlin: JUnit tests in `src/commonTest/kotlin/` and `src/jvmTest/kotlin/`
-- Dart: Tests in `test/` directory using Dart's test framework
-- Test application in `kadb-kt/kadb-test-app/` provides GUI testing capabilities
+- **Dart Tests**: Unit tests in `test/` directory using Dart's test framework
+- **Flutter Tests**: Widget and integration tests in `example/test/`
+- **Manual Testing**: Use Flutter example app for end-to-end testing with real devices
+- **Test Coverage**: Run `dart test --coverage` for coverage reports
