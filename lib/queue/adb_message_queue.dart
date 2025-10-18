@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:math';
 
 import '../core/adb_message.dart';
 import '../core/adb_protocol.dart';
@@ -21,8 +20,7 @@ class AdbMessageQueue {
   static const int _minLocalIdForRetry = 4;
   
   final AdbReader _adbReader;
-  final Random _random = Random();
-  final Map<int, Map<int, Queue<AdbMessage>>> _queues = {};
+    final Map<int, Map<int, Queue<AdbMessage>>> _queues = {};
   final Set<int> _openStreams = {};
   final StreamController<AdbMessage> _messageController =
       StreamController<AdbMessage>.broadcast();
@@ -328,17 +326,7 @@ class AdbMessageQueue {
     return message.command == AdbProtocol.CMD_CLSE;
   }
 
-  /// 检查是否为有效的ADB命令码
-  bool _isValidCommand(int command) {
-    return command == AdbProtocol.CMD_AUTH ||
-        command == AdbProtocol.CMD_CNXN ||
-        command == AdbProtocol.CMD_OPEN ||
-        command == AdbProtocol.CMD_OKAY ||
-        command == AdbProtocol.CMD_CLSE ||
-        command == AdbProtocol.CMD_WRTE ||
-        command == AdbProtocol.CMD_STLS;
-  }
-
+  
   /// 确保队列为空（用于测试）
   @Deprecated('仅用于测试')
   void ensureEmpty() {

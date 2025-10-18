@@ -324,17 +324,7 @@ class AlicePairingAuthCtx implements PairingAuthCtx {
     return buffer.buffer.asUint8List();
   }
   
-  /// 模拟SPAKE2密钥交换 - 暂时简化实现
-  Uint8List _simulateSpake2KeyExchange(Uint8List password, Uint8List theirMsg) {
-    // 这里需要实现完整的SPAKE2协议
-    // 暂时使用简化版本：组合密码和对方消息进行SHA-256哈希
-    final combined = Uint8List(password.length + theirMsg.length);
-    combined.setRange(0, password.length, password);
-    combined.setRange(password.length, combined.length, theirMsg);
-    final digest = SHA256Digest();
-    return digest.process(combined);
-  }
-  
+    
   /// 手动实现HKDF密钥派生 - 与Kotlin版本完全一致
   Uint8List _manualHkdf(Uint8List keyMaterial, Uint8List info, int length) {
     // HKDF实现：HMAC-based Extract-and-Expand Key Derivation Function

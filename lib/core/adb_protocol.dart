@@ -1,5 +1,7 @@
 /// ADB协议常量定义
 /// 包含ADB协议的所有命令、常量定义
+library;
+
 class AdbProtocol {
   static const int adbHeaderLength = 24;
 
@@ -134,11 +136,4 @@ class AdbProtocol {
     buffer.add((value >> 24) & 0xFF);
   }
 
-  /// 从小端序字节数组中读取32位整数
-  static int _readIntLe(List<int> data, int offset) {
-    return data[offset] |
-        (data[offset + 1] << 8) |
-        (data[offset + 2] << 16) |
-        (data[offset + 3] << 24);
   }
-}

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'adb_message.dart';
 import 'adb_protocol.dart';
 import '../debug/logging.dart';
+import '../utils/byte_utils.dart';
 
 /// ADB消息读取器
 /// 负责从数据源读取ADB协议消息
@@ -19,12 +20,12 @@ class AdbReader {
     final headerBytes = await _readBytesExact(AdbProtocol.ADB_HEADER_LENGTH);
 
     // 解析消息头
-    final command = _readIntLe(headerBytes, 0);
-    final arg0 = _readIntLe(headerBytes, 4);
-    final arg1 = _readIntLe(headerBytes, 8);
-    final payloadLength = _readIntLe(headerBytes, 12);
-    final checksum = _readIntLe(headerBytes, 16);
-    final magic = _readIntLe(headerBytes, 20);
+    final command = ByteUtils.readIntLe(headerBytes, 0);
+    final arg0 = ByteUtils.readIntLe(headerBytes, 4);
+    final arg1 = ByteUtils.readIntLe(headerBytes, 8);
+    final payloadLength = ByteUtils.readIntLe(headerBytes, 12);
+    final checksum = ByteUtils.readIntLe(headerBytes, 16);
+    final magic = ByteUtils.readIntLe(headerBytes, 20);
 
     // 验证魔数
     if ((command ^ magic) != 0xFFFFFFFF) {
@@ -67,14 +68,7 @@ class AdbReader {
     return buffer;
   }
 
-  /// 从小端序字节数组中读取32位整数
-  int _readIntLe(List<int> data, int offset) {
-    return data[offset] |
-        (data[offset + 1] << 8) |
-        (data[offset + 2] << 16) |
-        (data[offset + 3] << 24);
-  }
-
+  
   /// 关闭读取器
   void close() {
     // Dart中不需要显式关闭，由GC处理

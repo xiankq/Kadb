@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'adb_protocol.dart';
+import '../utils/byte_utils.dart';
 
 /// ADB消息类
 /// 表示ADB协议中的一个完整消息
@@ -65,7 +66,7 @@ class AdbMessage {
     final id = payload[0];
     if (id < 0 || id > 3) return null;
 
-    final length = _readIntLe(payload, 1);
+    final length = ByteUtils.readIntLe(payload, 1);
     if (length != payloadLength - 5) return null;
 
     if (id == 3) {
@@ -108,17 +109,11 @@ class AdbMessage {
     };
     if (!syncIds.contains(id)) return null;
 
-    final arg = _readIntLe(payload, 4);
+    final arg = ByteUtils.readIntLe(payload, 4);
     return '[sync] $id($arg)';
   }
 
-  int _readIntLe(List<int> data, int offset) {
-    return data[offset] |
-        (data[offset + 1] << 8) |
-        (data[offset + 2] << 16) |
-        (data[offset + 3] << 24);
-  }
-
+  
   String _argStr(int arg) => arg.toRadixString(16).toUpperCase();
 
   String _commandStr() {
