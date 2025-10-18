@@ -116,7 +116,7 @@ class VideoStreamProvider with ChangeNotifier {
         'tunnel_forward=true '
         'audio=false '
         'control=false '
-        'cleanup=false '  // 改为false，防止服务器在没有客户端时立即退出
+        'cleanup=false ' // 改为false，防止服务器在没有客户端时立即退出
         'raw_stream=true '
         'max_size=720';
 
@@ -134,7 +134,7 @@ class VideoStreamProvider with ChangeNotifier {
       // 读取前几行输出来确认服务器启动
       final lines = <String>[];
       bool serverReady = false;
-      
+
       await for (final line in shellStream.stdout) {
         debugPrint('Scrcpy输出: $line');
         lines.add(line);
@@ -144,10 +144,9 @@ class VideoStreamProvider with ChangeNotifier {
             line.contains('INFO:') ||
             line.contains('server started') ||
             line.contains('video encoder')) {
-          debugPrint('✅ 找到服务器启动信息: $line');
           serverReady = true;
         }
-        
+
         // 检查是否有错误
         if (line.contains('ERROR') || line.contains('Exception')) {
           debugPrint('❌ Scrcpy服务器错误: $line');

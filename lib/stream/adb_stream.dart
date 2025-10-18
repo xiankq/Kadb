@@ -142,28 +142,28 @@ class AdbStream {
 
     _isClosed = true;
     _isReading = false;
-    
+
     // 发送关闭命令
     try {
       await _adbWriter.writeClose(_localId, _remoteId);
     } catch (e) {
       print('⚠️ 发送关闭命令时出错: $e');
     }
-    
+
     // 停止监听本地ID
     try {
       _messageQueue.stopListening(_localId);
     } catch (e) {
       print('⚠️ 停止监听本地ID时出错: $e');
     }
-    
+
     // 关闭数据流
     try {
       await _dataController.close();
     } catch (e) {
       print('⚠️ 关闭数据流时出错: $e');
     }
-    
+
     // 关闭关闭流
     try {
       await _closeController.close();
@@ -216,7 +216,8 @@ class AdbStream {
       } catch (e) {
         if (!_isClosed) {
           // 改进错误处理逻辑，提供更好的错误恢复机制
-          if (e is AdbStreamClosed || e.toString().contains('AdbStreamClosed')) {
+          if (e is AdbStreamClosed ||
+              e.toString().contains('AdbStreamClosed')) {
             // ADB流关闭，正常结束
             print('🔚 ADB流正常关闭');
             await _close();
@@ -231,7 +232,9 @@ class AdbStream {
             _retryCount++;
             if (_retryCount <= _maxRetries) {
               final delay = Duration(milliseconds: 500 * _retryCount);
-              print('⚠️ ADB流读取超时，重试 $_retryCount/$_maxRetries，等待 ${delay.inMilliseconds}ms');
+              print(
+                '⚠️ ADB流读取超时，重试 $_retryCount/$_maxRetries，等待 ${delay.inMilliseconds}ms',
+              );
               await Future.delayed(delay);
               continue;
             } else {
@@ -240,7 +243,7 @@ class AdbStream {
               break;
             }
           } else if (e.toString().contains('StateError') &&
-                     e.toString().contains('消息队列已关闭')) {
+              e.toString().contains('消息队列已关闭')) {
             // 消息队列关闭，连接已断开
             print('❌ 消息队列已关闭，ADB流终止');
             await _close();
@@ -261,7 +264,7 @@ class AdbStream {
         }
       }
     }
-    
+
     _isReading = false;
   }
 
@@ -270,7 +273,7 @@ class AdbStream {
   Future<void> _waitForRemoteIdAssignment() async {
     int attempts = 0;
     const maxAttempts = 3;
-    
+
     while (attempts < maxAttempts && !_isClosed) {
       attempts++;
       try {
@@ -282,7 +285,9 @@ class AdbStream {
         );
         _remoteId = okayMessage.arg0; // arg0 contains the remote ID
 
-        print('✅ 本地ID 0x${_localId.toRadixString(16)} 成功分配远程ID 0x${_remoteId.toRadixString(16)}');
+        print(
+          '✅ 本地ID 0x${_localId.toRadixString(16)} 成功分配远程ID 0x${_remoteId.toRadixString(16)}',
+        );
 
         // 完成远程ID等待
         if (!_remoteIdCompleter.isCompleted) {
@@ -291,7 +296,7 @@ class AdbStream {
         return;
       } catch (e) {
         print('⚠️ 等待远程ID分配失败 (尝试 $attempts/$maxAttempts): $e');
-        
+
         if (attempts >= maxAttempts || _isClosed) {
           // 如果达到最大重试次数或流已关闭，完成Completer
           if (!_remoteIdCompleter.isCompleted) {
@@ -299,7 +304,7 @@ class AdbStream {
           }
           rethrow;
         }
-        
+
         // 等待一段时间后重试
         if (!_isClosed) {
           await Future.delayed(Duration(milliseconds: 1000));
@@ -313,28 +318,28 @@ class AdbStream {
     if (!_isClosed) {
       _isClosed = true;
       _isReading = false;
-      
+
       // 停止监听本地ID
       try {
         _messageQueue.stopListening(_localId);
       } catch (e) {
         print('⚠️ 停止监听本地ID时出错: $e');
       }
-      
+
       // 发送关闭通知
       try {
         _closeController.add(null);
       } catch (e) {
         // 忽略控制器已关闭的异常
       }
-      
+
       // 关闭数据流
       try {
         await _dataController.close();
       } catch (e) {
         print('⚠️ 关闭数据流时出错: $e');
       }
-      
+
       // 关闭关闭流
       try {
         await _closeController.close();

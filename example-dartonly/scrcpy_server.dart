@@ -56,7 +56,7 @@ void main() async {
     print('正在启动scrcpy服务器...');
     final shellCommand =
         'CLASSPATH=/data/local/tmp/scrcpy-server.jar '
-            'app_process / com.genymobile.scrcpy.Server 3.3.3 ' +
+        'app_process / com.genymobile.scrcpy.Server 3.3.3 '
         'tunnel_forward=true audio=false control=false cleanup=false raw_stream=true max_size=720';
 
     final shellStream = await KadbDart.executeShell(
