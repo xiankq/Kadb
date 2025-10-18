@@ -16,7 +16,6 @@ export 'core/adb_message.dart';
 export 'core/adb_reader.dart';
 export 'core/adb_writer.dart';
 export 'core/adb_connection.dart';
-export 'core/adb_message_queue.dart';
 
 // 证书和密钥管理
 export 'cert/adb_key_pair.dart';
