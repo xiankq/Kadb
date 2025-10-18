@@ -17,12 +17,12 @@ void main() async {
 
   try {
     // 1. 连接设备
-    print('正在连接到设备 192.168.2.32:5556...');
+    print('正在连接到设备 192.168.2.32:5555...');
     final keyPair = await CertUtils.loadKeyPair();
 
     connection = await KadbDart.create(
       host: '192.168.2.32',
-      port: 5556,
+      port: 5557,
       keyPair: keyPair,
       debug: false,
       ioTimeoutMs: 30000,
@@ -42,10 +42,10 @@ void main() async {
     print('✅ scrcpy-server已推送');
 
     // 3. 启动TCP转发
-    print('正在启动TCP转发: 端口 11238 -> localabstract:scrcpy');
+    print('正在启动TCP转发: 端口 1234 -> localabstract:scrcpy');
     forwarder = TcpForwarder(
       connection,
-      11238,
+      1234,
       'localabstract:scrcpy',
       debug: false, // 关闭调试输出以提升性能
     );
@@ -55,8 +55,8 @@ void main() async {
     // 4. 启动scrcpy服务器
     print('正在启动scrcpy服务器...');
     final shellCommand =
-        'CLASSPATH=/data/local/tmp/scrcpy-server.jar ' +
-        'app_process / com.genymobile.scrcpy.Server 3.3.3 ' +
+        'CLASSPATH=/data/local/tmp/scrcpy-server.jar '
+            'app_process / com.genymobile.scrcpy.Server 3.3.3 ' +
         'tunnel_forward=true audio=false control=false cleanup=false raw_stream=true max_size=720';
 
     final shellStream = await KadbDart.executeShell(
@@ -78,9 +78,9 @@ void main() async {
     // 6. 显示使用说明
     print('\n🎉 scrcpy服务器启动完成！');
     print('📺 使用以下命令连接视频流:');
-    print('   ffplay -v quiet -i tcp://localhost:11238');
+    print('   ffplay -v quiet -i tcp://localhost:1234');
     print('   或');
-    print('   vlc tcp://localhost:11238');
+    print('   vlc tcp://localhost:1234');
     print('\n💡 提示：视频流可能需要几秒钟才能稳定\n');
 
     // 7. 保持运行（最简单的循环，完全避免创建新的流）
@@ -90,7 +90,7 @@ void main() async {
     while (true) {
       try {
         await Future.delayed(Duration(seconds: 60));
-        print('💡 服务器运行中... 端口: 11238');
+        print('💡 服务器运行中... 端口: 1234');
       } catch (e) {
         print('⚠️ 运行时警告: $e');
         // 继续运行，不退出

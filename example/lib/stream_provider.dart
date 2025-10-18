@@ -81,7 +81,7 @@ class VideoStreamProvider with ChangeNotifier {
         connection,
         serverFile.path,
         '/data/local/tmp/scrcpy-server.jar',
-        mode: 33261,
+        mode: 33261, // 0o644 in decimal
       );
     } catch (e) {
       throw Exception('推送scrcpy-server失败: $e');
@@ -108,43 +108,68 @@ class VideoStreamProvider with ChangeNotifier {
   }
 
   Future<void> _startScrcpyServer(AdbConnection connection) async {
-    // 使用最基本的scrcpy参数，避免版本兼容问题
+    // 使用scrcpy参数，输出标准格式的视频流
+    // 使用与示例代码相同的参数，确保兼容性
     final shellCommand =
         'CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / '
         'com.genymobile.scrcpy.Server 3.3.3 '
-        'tunnel_forward=true max_size=720 raw_stream=true video_codec=h264';
+        'tunnel_forward=true '
+        'audio=false '
+        'control=false '
+        'cleanup=false '  // 改为false，防止服务器在没有客户端时立即退出
+        'raw_stream=true '
+        'max_size=720';
 
-    debugPrint('简化的Scrcpy命令: $shellCommand');
+    debugPrint('完整的Scrcpy命令: $shellCommand');
 
     try {
-      // 执行shell命令并启用调试输出
+      // 执行shell命令
       final shellStream = await KadbDart.executeShell(
         connection,
-        shellCommand,
-        debug: true, // 启用调试模式，会自动打印输出
+        'sh',
+        args: ['-c', shellCommand],
+        debug: kDebugMode,
       );
 
-      // 读取前几行输出来获取设备信息
+      // 读取前几行输出来确认服务器启动
       final lines = <String>[];
+      bool serverReady = false;
+      
       await for (final line in shellStream.stdout) {
-        debugPrint('应用层Scrcpy输出: $line');
+        debugPrint('Scrcpy输出: $line');
         lines.add(line);
 
-        // 如果找到设备信息行，就停止读取（避免阻塞）
-        if (line.contains('Device:') || line.contains('INFO:')) {
-          debugPrint('✅ 找到设备信息: $line');
-          // 可以在这里解析设备信息并存储
+        // 检查服务器是否准备好
+        if (line.contains('Device:') ||
+            line.contains('INFO:') ||
+            line.contains('server started') ||
+            line.contains('video encoder')) {
+          debugPrint('✅ 找到服务器启动信息: $line');
+          serverReady = true;
+        }
+        
+        // 检查是否有错误
+        if (line.contains('ERROR') || line.contains('Exception')) {
+          debugPrint('❌ Scrcpy服务器错误: $line');
+          throw Exception('Scrcpy服务器启动失败: $line');
+        }
+
+        // 如果找到服务器启动信息，继续监控几行确保稳定
+        if (serverReady && lines.length > 5) {
+          debugPrint('✅ scrcpy服务器启动成功并稳定运行');
           break;
         }
 
-        // 只读取前几行，避免阻塞
-        if (lines.length > 10) {
-          debugPrint('⚠️ 已读取10行输出，停止读取以避免阻塞');
+        // 只读取前20行，避免阻塞
+        if (lines.length > 20) {
+          debugPrint('⚠️ 已读取20行输出，停止读取以避免阻塞');
           break;
         }
       }
 
-      debugPrint('scrcpy服务器启动成功');
+      if (!serverReady) {
+        throw Exception('未能确认scrcpy服务器成功启动');
+      }
     } catch (e) {
       debugPrint('启动scrcpy服务器时出错: $e');
       rethrow;

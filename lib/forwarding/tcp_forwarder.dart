@@ -195,22 +195,36 @@ class TcpForwarder {
       if (_debug) {
         if (e is AdbStreamClosed) {
           print('⚠️ 数据转发过程中ADB流关闭，这可能是正常的连接断开');
+        } else if (e.toString().contains('AdbStreamClosed')) {
+          print('⚠️ 数据转发过程中检测到ADB流关闭异常: $e');
         } else {
           print('⚠️ 数据转发过程中发生错误: $e');
         }
       }
       // 不重新抛出异常，继续执行清理逻辑
     } finally {
-      // 清理资源
-      try {
-        await client.close();
-      } catch (e) {
-        // 忽略关闭客户端的错误
+      // 清理资源，使用更安全的关闭方式
+      await _cleanupClientConnection(client, adbStream);
+    }
+  }
+
+  /// 安全清理客户端连接资源
+  Future<void> _cleanupClientConnection(Socket client, AdbStream adbStream) async {
+    // 关闭客户端连接
+    try {
+      await client.close();
+    } catch (e) {
+      if (_debug) {
+        print('⚠️ 关闭客户端连接时出错: $e');
       }
-      try {
-        await adbStream.close();
-      } catch (e) {
-        // 忽略关闭ADB流的错误
+    }
+
+    // 关闭ADB流
+    try {
+      await adbStream.close();
+    } catch (e) {
+      if (_debug) {
+        print('⚠️ 关闭ADB流时出错: $e');
       }
     }
   }
@@ -238,20 +252,41 @@ class TcpForwarder {
               : data.length;
           final chunk = data.sublist(i, end);
 
-          await sink.writeBytes(chunk);
-          // 只在数据块末尾flush，减少系统调用
-          if (end == data.length) {
-            await sink.flush();
-          }
-          if (_debug && chunk.isNotEmpty) {
-            print(
-              '📤 Socket->ADB: 发送 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}',
-            );
+          try {
+            await sink.writeBytes(chunk);
+            // 只在数据块末尾flush，减少系统调用
+            if (end == data.length) {
+              await sink.flush();
+            }
+            if (_debug && chunk.isNotEmpty) {
+              print(
+                '📤 Socket->ADB: 发送 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}',
+              );
+            }
+          } catch (e) {
+            if (e.toString().contains('AdbStreamClosed') || e is AdbStreamClosed) {
+              print('🔚 Socket->ADB: ADB流已关闭，停止转发');
+              return;
+            } else if (e.toString().contains('StateError') && e.toString().contains('流已关闭')) {
+              print('🔚 Socket->ADB: 流已关闭，停止转发');
+              return;
+            } else {
+              print('⚠️ Socket->ADB: 写入数据时出错: $e');
+              // 继续尝试，可能是暂时性问题
+              await Future.delayed(Duration(milliseconds: 100));
+              continue;
+            }
           }
         }
       }
     } catch (e) {
-      // 连接断开，正常结束，静默处理
+      if (_debug) {
+        if (e.toString().contains('SocketException')) {
+          print('🔚 Socket->ADB: Socket连接断开，正常结束');
+        } else {
+          print('⚠️ Socket->ADB: 转发过程中出错: $e');
+        }
+      }
     }
   }
 
@@ -270,20 +305,38 @@ class TcpForwarder {
               : data.length;
           final chunk = data.sublist(i, end);
 
-          sink.add(chunk);
-          // 只在数据块末尾flush，减少系统调用
-          if (end == data.length) {
-            await sink.flush();
-          }
-          if (_debug && chunk.isNotEmpty) {
-            print(
-              '📥 ADB->Socket: 接收 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}',
-            );
+          try {
+            sink.add(chunk);
+            // 只在数据块末尾flush，减少系统调用
+            if (end == data.length) {
+              await sink.flush();
+            }
+            if (_debug && chunk.isNotEmpty) {
+              print(
+                '📥 ADB->Socket: 接收 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}',
+              );
+            }
+          } catch (e) {
+            if (e.toString().contains('SocketException')) {
+              print('🔚 ADB->Socket: Socket连接断开，停止转发');
+              return;
+            } else {
+              print('⚠️ ADB->Socket: 写入数据时出错: $e');
+              // 继续尝试，可能是暂时性问题
+              await Future.delayed(Duration(milliseconds: 100));
+              continue;
+            }
           }
         }
       }
     } catch (e) {
-      // 连接断开，正常结束，静默处理
+      if (_debug) {
+        if (e.toString().contains('AdbStreamClosed') || e.toString().contains('StateError')) {
+          print('🔚 ADB->Socket: ADB流已关闭，正常结束');
+        } else {
+          print('⚠️ ADB->Socket: 转发过程中出错: $e');
+        }
+      }
     }
   }
 

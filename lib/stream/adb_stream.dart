@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import '../core/adb_protocol.dart';
 import '../core/adb_writer.dart';
 import '../queue/adb_message_queue.dart';
+import '../exception/adb_stream_closed.dart';
 
 /// ADB流数据源接口
 abstract class AdbStreamSource {
@@ -64,6 +65,9 @@ class AdbStream {
       StreamController<void>.broadcast();
 
   bool _isClosed = false;
+  bool _isReading = false;
+  int _retryCount = 0;
+  static const int _maxRetries = 3;
 
   AdbStream({
     required int localId,
@@ -137,15 +141,41 @@ class AdbStream {
     }
 
     _isClosed = true;
-    await _adbWriter.writeClose(_localId, _remoteId);
+    _isReading = false;
+    
+    // 发送关闭命令
+    try {
+      await _adbWriter.writeClose(_localId, _remoteId);
+    } catch (e) {
+      print('⚠️ 发送关闭命令时出错: $e');
+    }
+    
     // 停止监听本地ID
-    _messageQueue.stopListening(_localId);
-    await _dataController.close();
-    await _closeController.close();
+    try {
+      _messageQueue.stopListening(_localId);
+    } catch (e) {
+      print('⚠️ 停止监听本地ID时出错: $e');
+    }
+    
+    // 关闭数据流
+    try {
+      await _dataController.close();
+    } catch (e) {
+      print('⚠️ 关闭数据流时出错: $e');
+    }
+    
+    // 关闭关闭流
+    try {
+      await _closeController.close();
+    } catch (e) {
+      print('⚠️ 关闭关闭流时出错: $e');
+    }
   }
 
   /// 开始读取数据
   void _startReading() {
+    if (_isReading) return;
+    _isReading = true;
     _readLoop().catchError((error) {
       if (!_isClosed) {
         _dataController.addError(error);
@@ -157,7 +187,13 @@ class AdbStream {
   /// 读取循环
   Future<void> _readLoop() async {
     // First, wait for the OKAY message that assigns the remote ID
-    _waitForRemoteIdAssignment();
+    try {
+      await _waitForRemoteIdAssignment();
+    } catch (e) {
+      print('❌ 等待远程ID分配失败: $e');
+      await _close();
+      return;
+    }
 
     while (!_isClosed) {
       try {
@@ -166,6 +202,9 @@ class AdbStream {
           _localId,
           AdbProtocol.CMD_WRTE,
         );
+
+        // 重置重试计数器
+        _retryCount = 0;
 
         // 接收到数据
         if (message.payload.isNotEmpty) {
@@ -176,42 +215,96 @@ class AdbStream {
         await _adbWriter.writeOkay(_localId, _remoteId);
       } catch (e) {
         if (!_isClosed) {
-          // 只有在是真正的流关闭异常时才关闭流
-          // 其他异常可能是暂时的网络问题，不应该立即关闭流
-          if (e.toString().contains('AdbStreamClosed') ||
-              e.toString().contains('CLSE')) {
+          // 改进错误处理逻辑，提供更好的错误恢复机制
+          if (e is AdbStreamClosed || e.toString().contains('AdbStreamClosed')) {
+            // ADB流关闭，正常结束
+            print('🔚 ADB流正常关闭');
+            await _close();
+            break;
+          } else if (e.toString().contains('CLSE')) {
+            // 设备主动关闭流，正常结束
+            print('🔚 设备主动关闭ADB流');
+            await _close();
+            break;
+          } else if (e.toString().contains('TimeoutException')) {
+            // 超时异常，实现指数退避重试
+            _retryCount++;
+            if (_retryCount <= _maxRetries) {
+              final delay = Duration(milliseconds: 500 * _retryCount);
+              print('⚠️ ADB流读取超时，重试 $_retryCount/$_maxRetries，等待 ${delay.inMilliseconds}ms');
+              await Future.delayed(delay);
+              continue;
+            } else {
+              print('❌ ADB流读取超时，达到最大重试次数');
+              await _close();
+              break;
+            }
+          } else if (e.toString().contains('StateError') &&
+                     e.toString().contains('消息队列已关闭')) {
+            // 消息队列关闭，连接已断开
+            print('❌ 消息队列已关闭，ADB流终止');
             await _close();
             break;
           } else {
-            // 其他异常暂时忽略，继续尝试读取
-            await Future.delayed(Duration(milliseconds: 100));
+            // 其他异常，记录但继续尝试，增加延迟避免快速重试
+            _retryCount++;
+            if (_retryCount <= _maxRetries) {
+              print('⚠️ ADB流读取异常 (重试 $_retryCount/$_maxRetries): $e');
+              await Future.delayed(Duration(milliseconds: 200 * _retryCount));
+              continue;
+            } else {
+              print('❌ ADB流读取异常，达到最大重试次数: $e');
+              await _close();
+              break;
+            }
           }
         }
       }
     }
+    
+    _isReading = false;
   }
 
   /// 等待远程ID分配
   /// 当打开流后，设备会响应一个OKAY消息，其中包含远程ID
   Future<void> _waitForRemoteIdAssignment() async {
-    try {
-      // 等待OKAY消息，它包含分配给此流的远程ID
-      final okayMessage = await _messageQueue.take(
-        _localId,
-        AdbProtocol.CMD_OKAY,
-      );
-      _remoteId = okayMessage.arg0; // arg0 contains the remote ID
+    int attempts = 0;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts && !_isClosed) {
+      attempts++;
+      try {
+        // 等待OKAY消息，它包含分配给此流的远程ID
+        final okayMessage = await _messageQueue.takeWithTimeout(
+          _localId,
+          AdbProtocol.CMD_OKAY,
+          timeout: Duration(seconds: 5),
+        );
+        _remoteId = okayMessage.arg0; // arg0 contains the remote ID
 
-      // 完成远程ID等待
-      if (!_remoteIdCompleter.isCompleted) {
-        _remoteIdCompleter.complete();
+        print('✅ 本地ID 0x${_localId.toRadixString(16)} 成功分配远程ID 0x${_remoteId.toRadixString(16)}');
+
+        // 完成远程ID等待
+        if (!_remoteIdCompleter.isCompleted) {
+          _remoteIdCompleter.complete();
+        }
+        return;
+      } catch (e) {
+        print('⚠️ 等待远程ID分配失败 (尝试 $attempts/$maxAttempts): $e');
+        
+        if (attempts >= maxAttempts || _isClosed) {
+          // 如果达到最大重试次数或流已关闭，完成Completer
+          if (!_remoteIdCompleter.isCompleted) {
+            _remoteIdCompleter.completeError(e);
+          }
+          rethrow;
+        }
+        
+        // 等待一段时间后重试
+        if (!_isClosed) {
+          await Future.delayed(Duration(milliseconds: 1000));
+        }
       }
-    } catch (e) {
-      // 如果发生错误，也完成Completer以避免永远等待
-      if (!_remoteIdCompleter.isCompleted) {
-        _remoteIdCompleter.completeError(e);
-      }
-      rethrow;
     }
   }
 
@@ -219,9 +312,35 @@ class AdbStream {
   Future<void> _close() async {
     if (!_isClosed) {
       _isClosed = true;
-      _closeController.add(null);
-      await _dataController.close();
-      await _closeController.close();
+      _isReading = false;
+      
+      // 停止监听本地ID
+      try {
+        _messageQueue.stopListening(_localId);
+      } catch (e) {
+        print('⚠️ 停止监听本地ID时出错: $e');
+      }
+      
+      // 发送关闭通知
+      try {
+        _closeController.add(null);
+      } catch (e) {
+        // 忽略控制器已关闭的异常
+      }
+      
+      // 关闭数据流
+      try {
+        await _dataController.close();
+      } catch (e) {
+        print('⚠️ 关闭数据流时出错: $e');
+      }
+      
+      // 关闭关闭流
+      try {
+        await _closeController.close();
+      } catch (e) {
+        print('⚠️ 关闭关闭流时出错: $e');
+      }
     }
   }
 

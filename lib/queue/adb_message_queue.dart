@@ -55,12 +55,12 @@ class AdbMessageQueue {
 
     // 检查是否还在监听该本地ID，如果不在监听，说明流已关闭
     if (!_openStreams.contains(localId)) {
-      Logging.verbose('ADB消息队列: 本地ID 0x${localId.toRadixString(16)} 不在监听列表中');
+      print('🔍 ADB消息队列: 本地ID 0x${localId.toRadixString(16)} 不在监听列表中');
 
       // 修复：对于某些特殊情况，尝试重新添加到监听列表而不是立即抛出异常
       if (localId >= 4) {
         // 对于ID >= 4的流，可能是临时创建的测试流
-        Logging.verbose('尝试重新添加本地ID 0x${localId.toRadixString(16)} 到监听列表');
+        print('🔍 尝试重新添加本地ID 0x${localId.toRadixString(16)} 到监听列表');
         _openStreams.add(localId);
         if (!_queues.containsKey(localId)) {
           _queues[localId] = {};
@@ -109,7 +109,7 @@ class AdbMessageQueue {
       final subscription = _messageController.stream.listen((message) {
         // 检查是否是流关闭通知
         if (message.command == 0xFFFFFFFF && message.arg1 == localId) {
-          if (!messageReceived) {
+          if (!messageReceived && !completer.isCompleted) {
             messageReceived = true;
             completer.completeError(AdbStreamClosed(localId));
           }
@@ -119,7 +119,7 @@ class AdbMessageQueue {
         // 正常消息处理
         if (_getLocalId(message) == localId &&
             _getCommand(message) == command) {
-          if (!messageReceived) {
+          if (!messageReceived && !completer.isCompleted) {
             messageReceived = true;
             completer.complete(message);
           }
@@ -142,25 +142,40 @@ class AdbMessageQueue {
       throw StateError('未监听本地ID: $localId');
     }
 
-    final message = streamQueues[command]?.removeFirst();
-    if (message == null && !_openStreams.contains(localId)) {
-      Logging.verbose(
-        'ADB消息队列: _poll中本地ID 0x${localId.toRadixString(16)} 不在监听列表中',
-      );
-
-      // 修复：对于某些特殊情况，尝试重新添加到监听列表而不是立即抛出异常
-      if (localId >= 4) {
-        // 对于ID >= 4的流，可能是临时创建的测试流
-        Logging.verbose(
-          '_poll中尝试重新添加本地ID 0x${localId.toRadixString(16)} 到监听列表',
+    final commandQueue = streamQueues[command];
+    if (commandQueue == null || commandQueue.isEmpty) {
+      // 检查是否还在监听该本地ID
+      if (!_openStreams.contains(localId)) {
+        print(
+          '🔍 ADB消息队列: _poll中本地ID 0x${localId.toRadixString(16)} 不在监听列表中',
         );
-        _openStreams.add(localId);
-        return null; // 返回null让上层继续处理
-      } else {
-        throw AdbStreamClosed(localId);
+
+        // 修复：对于某些特殊情况，尝试重新添加到监听列表而不是立即抛出异常
+        if (localId >= 4) {
+          // 对于ID >= 4的流，可能是临时创建的测试流
+          print(
+            '🔍 _poll中尝试重新添加本地ID 0x${localId.toRadixString(16)} 到监听列表',
+          );
+          _openStreams.add(localId);
+          return null; // 返回null让上层继续处理
+        } else {
+          throw AdbStreamClosed(localId);
+        }
       }
+      // 队列为空但流仍在监听，返回null
+      return null;
     }
-    return message;
+
+    try {
+      final message = commandQueue.removeFirst();
+      return message;
+    } catch (e) {
+      if (e is StateError && e.message.contains('No element')) {
+        // 队列为空，返回null而不是抛出异常
+        return null;
+      }
+      rethrow;
+    }
   }
 
   /// 开始异步读取消息
@@ -183,7 +198,17 @@ class AdbMessageQueue {
 
         // 按照Kotlin版本的方式处理CLSE命令：不加入队列，直接清理流
         if (_isCloseCommand(message)) {
+          print('🔚 收到CLSE命令，关闭本地ID 0x${localId.toRadixString(16)} 的流');
           _openStreams.remove(localId);
+
+          // 清理该流的所有消息队列
+          if (_queues.containsKey(localId)) {
+            final streamQueues = _queues[localId]!;
+            for (final command in streamQueues.keys.toList()) {
+              streamQueues[command]?.clear();
+            }
+            _queues.remove(localId);
+          }
 
           // 通知所有等待的take()调用 - 让它们检查_openStreams状态
           // 通过发送一个特殊事件来唤醒所有等待者
@@ -419,7 +444,7 @@ class AdbMessageQueue {
       final subscription = _messageController.stream.listen((message) {
         if (_getLocalId(message) == localId &&
             _getCommand(message) == command) {
-          if (!messageReceived) {
+          if (!messageReceived && !completer.isCompleted) {
             messageReceived = true;
             timer.cancel();
             completer.complete(message);

@@ -19,7 +19,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   void initState() {
     super.initState();
     debugPrint('ConnectionScreen 初始化');
-    _ipController.text = '192.168.10.204';
+    _ipController.text = '192.168.10.171';
     _portController.text = '5555';
   }
 
@@ -52,15 +52,15 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
         debugPrint('设备连接成功，启动视频流...');
         // 自动启动视频流
         final streamProvider = context.read<VideoStreamProvider>();
-        final streamStarted = await streamProvider.startStream(connectionProvider.connection!);
+        final streamStarted = await streamProvider.startStream(
+          connectionProvider.connection!,
+        );
 
         if (streamStarted && mounted) {
           debugPrint('视频流启动成功，导航到视频页面');
           Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (context) => const VideoScreen(),
-            ),
+            MaterialPageRoute(builder: (context) => const VideoScreen()),
           );
         } else {
           debugPrint('视频流启动失败');
@@ -78,10 +78,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
   }
 
@@ -110,10 +107,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
                 const Text(
                   '连接到Android设备',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 48),
@@ -153,22 +147,29 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                           width: double.infinity,
                           height: 50,
                           child: ElevatedButton(
-                            onPressed: (connectionProvider.isConnecting ||
-                                       connectionProvider.isConnected ||
-                                       streamProvider.isStarting) ? null : _connect,
+                            onPressed:
+                                (connectionProvider.isConnecting ||
+                                    connectionProvider.isConnected ||
+                                    streamProvider.isStarting)
+                                ? null
+                                : _connect,
                             style: ElevatedButton.styleFrom(
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),
                               ),
                             ),
-                            child: (connectionProvider.isConnecting || streamProvider.isStarting)
+                            child:
+                                (connectionProvider.isConnecting ||
+                                    streamProvider.isStarting)
                                 ? const Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       SizedBox(
                                         width: 20,
                                         height: 20,
-                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
                                       ),
                                       SizedBox(width: 12),
                                       Text('连接中...'),
@@ -200,13 +201,13 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                               connectionProvider.isConnected
                                   ? Icons.check_circle
                                   : connectionProvider.isConnecting
-                                      ? Icons.pending
-                                      : Icons.info,
+                                  ? Icons.pending
+                                  : Icons.info,
                               color: connectionProvider.isConnected
                                   ? Colors.green
                                   : connectionProvider.isConnecting
-                                      ? Colors.orange
-                                      : Colors.grey,
+                                  ? Colors.orange
+                                  : Colors.grey,
                             ),
                             const SizedBox(width: 8),
                             Expanded(
@@ -225,13 +226,13 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                                 streamProvider.isStreaming
                                     ? Icons.play_circle
                                     : streamProvider.isStarting
-                                        ? Icons.pending
-                                        : Icons.info,
+                                    ? Icons.pending
+                                    : Icons.info,
                                 color: streamProvider.isStreaming
                                     ? Colors.green
                                     : streamProvider.isStarting
-                                        ? Colors.orange
-                                        : Colors.grey,
+                                    ? Colors.orange
+                                    : Colors.grey,
                               ),
                               const SizedBox(width: 8),
                               Expanded(

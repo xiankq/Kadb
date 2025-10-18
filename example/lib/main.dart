@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:kadb_dart/kadb_dart.dart';
-import 'package:media_kit/media_kit.dart';
+import 'package:fvp/fvp.dart';
 import 'connection_provider.dart';
 import 'stream_provider.dart';
 import 'views/connection_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 注册 FVP 插件 - 用于 TCP 流播放
+  registerWith(options: {
+    'platforms': ['windows', 'macos', 'linux', 'android', 'ios'],
+    'video.decoders': ['FFmpeg'], // 使用 FFmpeg 解码器处理 TCP 流
+    'lowLatency': 1, // 低延迟模式，适合网络流
+  });
 
   // 添加全局错误处理
   FlutterError.onError = (FlutterErrorDetails details) {
@@ -17,14 +23,7 @@ void main() async {
     debugPrint('====================');
   };
 
-  // 初始化MediaKit，配置允许加载不安全的URL
-  try {
-    MediaKit.ensureInitialized();
-    debugPrint('MediaKit 初始化成功');
-  } catch (e) {
-    debugPrint('MediaKit 初始化失败: $e');
-  }
-
+  
   try {
     runApp(
       MultiProvider(
@@ -41,7 +40,7 @@ void main() async {
         child: const ScrcpyApp(),
       ),
     );
-    debugPrint('应用启动成功');
+    debugPrint('应用启动成功 - FVP 插件已注册');
   } catch (e, stackTrace) {
     debugPrint('应用启动失败: $e');
     debugPrint('Stack trace: $stackTrace');
