@@ -64,12 +64,12 @@ class AdbMessageQueue {
 
     // 检查是否还在监听该本地ID，如果不在监听，说明流已关闭
     if (!_openStreams.contains(localId)) {
-      print('ADB Message Queue: local ID 0x${localId.toRadixString(16)} not in listening list');
+      print('ADB消息队列: 本地ID 0x${localId.toRadixString(16)} 不在监听列表中');
 
       // 修复：对于某些特殊情况，尝试重新添加到监听列表而不是立即抛出异常
       if (localId >= _minLocalIdForRetry) {
         // For streams with ID >= 4, they might be temporary test streams
-        print('ADB Message Queue: attempting to re-add local ID 0x${localId.toRadixString(16)} to listening list');
+        print('ADB消息队列: 尝试重新添加本地ID 0x${localId.toRadixString(16)} 到监听列表');
         _openStreams.add(localId);
         if (!_queues.containsKey(localId)) {
           _queues[localId] = {};
@@ -94,7 +94,7 @@ class AdbMessageQueue {
 
     final timer = Timer(timeout, () {
       if (!messageReceived) {
-        print('ADB Message Queue: message wait timeout: localId=$localId, command=$command (0x${command.toRadixString(16).padLeft(8, '0')})');
+        print('ADB消息队列: 消息等待超时: localId=$localId, command=$command (0x${command.toRadixString(16).padLeft(8, '0')})');
         completer.completeError(
           TimeoutException(
             '等待消息超时: localId=$localId, command=$command (0x${command.toRadixString(16).padLeft(8, '0')})',
@@ -264,7 +264,7 @@ class AdbMessageQueue {
 
         // 按照Kotlin版本的方式处理CLSE命令：不加入队列，直接清理流
         if (_isCloseCommand(message)) {
-          print('ADB Message Queue: received CLSE command, closing stream for local ID 0x${localId.toRadixString(16)}');
+          print('ADB消息队列: 收到CLSE命令，关闭本地ID 0x${localId.toRadixString(16)}的流');
           _openStreams.remove(localId);
 
           // 清理该流的所有消息队列

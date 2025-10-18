@@ -112,7 +112,7 @@ class AdbShellStream {
   /// 开始读取Shell输出
   void _startReading() {
     if (_debug) {
-      print('ADB Shell: starting output reading...');
+      print('ADB Shell: 开始读取输出...');
     }
 
     _adbStream.dataStream.listen(
@@ -122,7 +122,7 @@ class AdbShellStream {
       onError: (error) {
         if (!_isClosed) {
           if (_debug) {
-            print('ADB Shell Error: $error');
+            print('ADB Shell 错误: $error');
           }
           _stdoutController.addError(error);
           _stderrController.addError(error);
@@ -131,7 +131,7 @@ class AdbShellStream {
       },
       onDone: () {
         if (_debug) {
-          print('ADB Shell: output stream ended');
+          print('ADB Shell: 输出流已结束');
         }
         if (!_isClosed) {
           _close();

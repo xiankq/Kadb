@@ -86,9 +86,9 @@ class TcpForwarder {
 
       if (_debug) {
         if (_targetPort != null) {
-          print('TCP forward started: local port $_hostPort -> device port $_targetPort');
+          print('TCP转发已启动: 本地端口 $_hostPort -> 设备端口 $_targetPort');
         } else {
-          print('TCP forward started: local port $_hostPort -> device service $_destination');
+          print('TCP转发已启动: 本地端口 $_hostPort -> 设备服务 $_destination');
         }
       }
     } catch (e) {
@@ -111,14 +111,14 @@ class TcpForwarder {
         await adbStream.waitForRemoteId().timeout(Duration(seconds: 5));
       } catch (e) {
         if (_debug) {
-          print('Warning: Failed to wait for remote ID assignment: $e');
+          print('警告: 等待远程ID分配失败: $e');
         }
         // 继续尝试，不立即关闭连接
       }
 
       if (_debug) {
         print(
-          'Connection established: ${client.remoteAddress.address}:${client.remotePort} -> $_destination',
+          '连接已建立: ${client.remoteAddress.address}:${client.remotePort} -> $_destination',
         );
       }
 
@@ -126,9 +126,9 @@ class TcpForwarder {
       unawaited(_handleClientForwarding(client, adbStream));
     } catch (e) {
       if (_debug) {
-        print('TCP forward error: $e');
-        print('Target service: $_destination');
-        print('Client address: ${client.remoteAddress.address}:${client.remotePort}');
+        print('TCP转发错误: $e');
+        print('目标服务: $_destination');
+        print('客户端地址: ${client.remoteAddress.address}:${client.remotePort}');
       }
 
       // 提供通用的错误信息
@@ -136,20 +136,20 @@ class TcpForwarder {
       if (errorMsg.contains('TimeoutException')) {
         if (_destination.startsWith('localabstract:')) {
           final serviceName = _destination.split(':')[1];
-          print('Warning: Connection timeout to Android service: $serviceName');
-          print('Possible causes:');
-          print('   1. Target service not started or starting');
-          print('   2. Service name incorrect');
-          print('   3. Target service may be handling other connections');
+          print('警告: 连接Android服务超时: $serviceName');
+          print('可能的原因:');
+          print('   1. 目标服务未启动或正在启动');
+          print('   2. 服务名称不正确');
+          print('   3. 目标服务可能正在处理其他连接');
         } else if (_destination.startsWith('tcp:')) {
           final port = _destination.split(':')[1];
-          print('Warning: Connection timeout to device TCP port: $port');
-          print('Possible causes:');
-          print('   1. No service listening on target port');
-          print('   2. Firewall blocking connection');
-          print('   3. Network connectivity issue');
+          print('警告: 连接设备TCP端口超时: $port');
+          print('可能的原因:');
+          print('   1. 目标端口没有服务监听');
+          print('   2. 防火墙阻止连接');
+          print('   3. 网络连接问题');
         }
-        print('Forwarder continues running, waiting for other connection attempts...');
+        print('转发器继续运行，等待其他连接尝试...');
         // 不重新抛出异常，继续运行转发器
         return;
       } else if (errorMsg.contains('AdbStreamClosed') || e is AdbStreamClosed) {
@@ -194,11 +194,11 @@ class TcpForwarder {
     } catch (e) {
       if (_debug) {
         if (e is AdbStreamClosed) {
-          print('ADB stream closed during data forwarding (normal connection termination)');
+          print('ADB流在数据转发期间关闭（正常连接终止）');
         } else if (e.toString().contains('AdbStreamClosed')) {
-          print('ADB stream closed exception detected during data forwarding: $e');
+          print('数据转发期间检测到ADB流关闭异常: $e');
         } else {
-          print('Error during data forwarding: $e');
+          print('数据转发期间发生错误: $e');
         }
       }
       // 不重新抛出异常，继续执行清理逻辑
