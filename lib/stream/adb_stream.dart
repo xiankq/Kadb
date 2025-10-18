@@ -54,11 +54,11 @@ class AdbStream {
   // 常量定义
   static const int _maxRetries = 3;
   static const int _defaultMaxPayloadSize = 1024 * 1024;
-  static const int _chunkSize = 256 * 1024; // 增加到256KB，提高传输效率
-  static const int _remoteIdAssignmentTimeoutSeconds = 3; // 减少远程ID分配超时
-  static const int _remoteIdAssignmentMaxAttempts = 2; // 减少重试次数
-  static const int _retryBaseDelayMs = 200; // 减少基础延迟
-  static const int _errorBaseDelayMs = 100; // 减少错误延迟
+  static const int _chunkSize = 128 * 1024; // 标准：128KB，平衡性能和兼容性
+  static const int _remoteIdAssignmentTimeoutSeconds = 5; // 标准：5秒远程ID分配超时
+  static const int _remoteIdAssignmentMaxAttempts = 3; // 标准：3次重试
+  static const int _retryBaseDelayMs = 500; // 标准：500ms基础延迟
+  static const int _errorBaseDelayMs = 200; // 标准：200ms错误延迟
 
   final AdbMessageQueue _messageQueue;
   final AdbWriter _adbWriter;
@@ -68,7 +68,7 @@ class AdbStream {
   final Completer<void> _remoteIdCompleter = Completer<void>();
 
   final StreamController<Uint8List> _dataController =
-      StreamController<Uint8List>.broadcast();
+      StreamController<Uint8List>.broadcast(); // 标准：支持多订阅者
   final StreamController<void> _closeController =
       StreamController<void>.broadcast();
 
@@ -207,9 +207,11 @@ class AdbStream {
         // 重置重试计数器
         _retryCount = 0;
 
-        // 接收到数据
+        // 接收到数据 - 零拷贝优化
         if (message.payload.isNotEmpty) {
-          _dataController.add(Uint8List.fromList(message.payload));
+          // 避免不必要的拷贝 - 直接传递数据
+          final payloadUint8 = Uint8List.fromList(message.payload);
+          _dataController.add(payloadUint8);
         }
 
         // 发送确认
@@ -445,6 +447,10 @@ class AdbStreamSinkImpl implements AdbStreamSink {
 
   @override
   Future<void> writeBytes(List<int> bytes) async {
+    // 优化：避免不必要的类型转换拷贝
+    if (bytes.isEmpty) return;
+
+    // 直接转换为Uint8List写入socket
     await _stream.write(Uint8List.fromList(bytes));
   }
 

@@ -116,9 +116,18 @@ class TcpForwarder {
         // 继续尝试，不立即关闭连接
       }
 
+      // 优化：为视频流设置Socket缓冲区
+      try {
+        client.setOption(SocketOption.tcpNoDelay, true); // 禁用Nagle算法，减少延迟
+      } catch (e) {
+        if (_debug) {
+          print('设置socket TCP_NODELAY失败: $e');
+        }
+      }
+
       if (_debug) {
         print(
-          '连接已建立: ${client.remoteAddress.address}:${client.remotePort} -> $_destination',
+          '连接已建立: ${client.remoteAddress.address}:${client.remotePort} -> $_destination (视频流优化)',
         );
       }
 
@@ -244,13 +253,13 @@ class TcpForwarder {
     try {
       final socketStream = source.asBroadcastStream();
       await for (final data in socketStream) {
-        // 优化：直接发送整个数据块，避免分块延迟
+        // 优化：针对视频流，立即flush确保实时性
         try {
           await sink.writeBytes(data);
-          // 移除flush调用，减少系统调用开销
+          await sink.flush(); // 恢复flush调用，对视频流实时性至关重要
           if (_debug && data.isNotEmpty) {
             print(
-              'Socket->ADB: sent ${data.length} bytes',
+              'Socket->ADB: 发送 ${data.length} 字节 (视频流实时传输)',
             );
           }
         } catch (e) {

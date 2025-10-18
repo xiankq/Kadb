@@ -13,7 +13,7 @@ class AdbMessageQueue {
   // 常量定义
   static const int _defaultTimeoutSeconds = 10; // 减少默认超时时间到10秒
   static const int _specialTimeoutSeconds = 30; // 减少特殊超时时间到30秒
-  static const int _nextTimeoutSeconds = 15; // 减少next方法超时时间到15秒
+  static const int _nextTimeoutSeconds = 45; // 增加next方法超时时间到45秒，支持Android 10认证
   static const int _readRetryDelayMs = 50; // 减少读取重试延迟
   static const int _specialLocalId = 1;
   static const int _specialCommand = 1163086915;
@@ -359,6 +359,9 @@ class AdbMessageQueue {
     final timer = Timer(timeout, () {
       if (!isCompleted) {
         isCompleted = true;
+        print('ADB消息队列: next()方法超时 - 等待时间: ${timeout.inSeconds}秒');
+        print('ADB消息队列: 当前消息队列状态 - 总队列数: ${_queues.length}, 监听中的流: ${_openStreams.length}');
+        print('ADB消息队列: 消息读取状态 - 正在读取: $_isReading, 消息流活跃: ${!_messageController.isClosed}');
         completer.completeError(TimeoutException('认证流程等待消息超时'));
       }
     });
