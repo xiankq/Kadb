@@ -75,13 +75,28 @@ void main() async {
     // 不要关闭shellStream，因为这会终止scrcpy服务器
     print('💡 shell流保持打开以维持scrcpy服务器运行');
 
+    // 监听shell流输出，提供更好的调试信息
+    shellStream.stdout.listen((output) {
+      if (output.contains('ERROR') || output.contains('error')) {
+        print('🔴 scrcpy服务器错误: $output');
+      } else if (output.contains('INFO') || output.contains('info')) {
+        print('ℹ️ scrcpy服务器信息: $output');
+      } else if (output.trim().isNotEmpty) {
+        print('📝 scrcpy服务器输出: $output');
+      }
+    });
+
     // 6. 显示使用说明
     print('\n🎉 scrcpy服务器启动完成！');
     print('📺 使用以下命令连接视频流:');
     print('   ffplay -v quiet -i tcp://localhost:1234');
     print('   或');
     print('   vlc tcp://localhost:1234');
-    print('\n💡 提示：视频流可能需要几秒钟才能稳定\n');
+    print('\n💡 重要提示：');
+    print('   • 视频流可能需要几秒钟才能稳定');
+    print('   • scrcpy-server是单实例服务，一次只能处理一个连接');
+    print('   • 关闭播放器后，需要等待几秒钟才能重新连接');
+    print('   • 如果连接失败，请等待5-10秒后重试\n');
 
     // 7. 保持运行（最简单的循环，完全避免创建新的流）
     print('🔄 服务器运行中，按 Ctrl+C 停止...');

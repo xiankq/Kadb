@@ -51,12 +51,20 @@ abstract class AdbStreamSink {
 /// ADB流类
 /// 管理ADB协议的数据流传输
 class AdbStream {
+  // 常量定义
+  static const int _maxRetries = 3;
+  static const int _defaultMaxPayloadSize = 1024 * 1024;
+  static const int _chunkSize = 256 * 1024; // 增加到256KB，提高传输效率
+  static const int _remoteIdAssignmentTimeoutSeconds = 3; // 减少远程ID分配超时
+  static const int _remoteIdAssignmentMaxAttempts = 2; // 减少重试次数
+  static const int _retryBaseDelayMs = 200; // 减少基础延迟
+  static const int _errorBaseDelayMs = 100; // 减少错误延迟
+
   final AdbMessageQueue _messageQueue;
   final AdbWriter _adbWriter;
   final int _maxPayloadSize;
   final int _localId;
-  int
-  _remoteId; // Make this mutable so it can be updated when the remote ID is assigned
+  int _remoteId; // 远程ID，会在连接后分配
   final Completer<void> _remoteIdCompleter = Completer<void>();
 
   final StreamController<Uint8List> _dataController =
@@ -67,7 +75,6 @@ class AdbStream {
   bool _isClosed = false;
   bool _isReading = false;
   int _retryCount = 0;
-  static const int _maxRetries = 3;
 
   AdbStream({
     required int localId,
@@ -75,14 +82,13 @@ class AdbStream {
     required String destination,
     required AdbMessageQueue messageQueue,
     required AdbWriter writer,
+    int? maxPayloadSize,
     bool debug = false,
   }) : _localId = localId,
-       _remoteId =
-           remoteId, // Initial remote ID is 0, will be updated after open
+       _remoteId = remoteId, // 初始远程ID为0，连接后会更新
        _messageQueue = messageQueue,
        _adbWriter = writer,
-       _maxPayloadSize = 1024 * 1024 {
-    // 默认最大负载大小
+       _maxPayloadSize = maxPayloadSize ?? _defaultMaxPayloadSize {
     // 注册本地ID到消息队列
     _messageQueue.startListening(_localId);
     _startReading();
@@ -116,11 +122,9 @@ class AdbStream {
       throw StateError('流已关闭');
     }
 
-    final chunks = _splitData(data);
-
-    for (int i = 0; i < chunks.length; i++) {
-      final chunk = chunks[i];
-      try {
+    try {
+      final chunks = _splitData(data);
+      for (final chunk in chunks) {
         await _adbWriter.writeWrite(
           _localId,
           _remoteId,
@@ -128,9 +132,9 @@ class AdbStream {
           0,
           chunk.length,
         );
-      } catch (e) {
-        rethrow;
       }
+    } catch (e) {
+      throw StateError('写入数据失败: $e');
     }
   }
 
@@ -142,33 +146,33 @@ class AdbStream {
 
     _isClosed = true;
     _isReading = false;
+    
+    // 安全关闭所有资源
+    await _safeExecute(() async => await _adbWriter.writeClose(_localId, _remoteId),
+                         '发送关闭命令');
+    _safeExecuteSync(() => _messageQueue.stopListening(_localId),
+                      '停止监听本地ID');
+    await _safeExecute(() async => await _dataController.close(),
+                         '关闭数据流');
+    await _safeExecute(() async => await _closeController.close(),
+                         '关闭关闭流');
+  }
 
-    // 发送关闭命令
+  /// 安全执行异步操作，捕获并记录异常
+  Future<void> _safeExecute(Future<void> Function() operation, String operationName) async {
     try {
-      await _adbWriter.writeClose(_localId, _remoteId);
+      await operation();
     } catch (e) {
-      print('⚠️ 发送关闭命令时出错: $e');
+      print('ADB Stream: error during $operationName: $e');
     }
+  }
 
-    // 停止监听本地ID
+  /// 安全执行同步操作，捕获并记录异常
+  void _safeExecuteSync(void Function() operation, String operationName) {
     try {
-      _messageQueue.stopListening(_localId);
+      operation();
     } catch (e) {
-      print('⚠️ 停止监听本地ID时出错: $e');
-    }
-
-    // 关闭数据流
-    try {
-      await _dataController.close();
-    } catch (e) {
-      print('⚠️ 关闭数据流时出错: $e');
-    }
-
-    // 关闭关闭流
-    try {
-      await _closeController.close();
-    } catch (e) {
-      print('⚠️ 关闭关闭流时出错: $e');
+      print('ADB Stream: error during $operationName: $e');
     }
   }
 
@@ -184,24 +188,21 @@ class AdbStream {
     });
   }
 
-  /// 读取循环
+  /// 读取循环 - 实时数据流优化版本
   Future<void> _readLoop() async {
     // First, wait for the OKAY message that assigns the remote ID
     try {
       await _waitForRemoteIdAssignment();
     } catch (e) {
-      print('❌ 等待远程ID分配失败: $e');
+      print('ADB Stream: failed to wait for remote ID assignment: $e');
       await _close();
       return;
     }
 
     while (!_isClosed) {
       try {
-        // 使用消息队列读取WRTE消息
-        final message = await _messageQueue.take(
-          _localId,
-          AdbProtocol.CMD_WRTE,
-        );
+        // 使用无超时的take方法，实现实时数据读取
+        final message = await _messageQueue.take(_localId, AdbProtocol.CMD_WRTE);
 
         // 重置重试计数器
         _retryCount = 0;
@@ -216,47 +217,39 @@ class AdbStream {
       } catch (e) {
         if (!_isClosed) {
           // 改进错误处理逻辑，提供更好的错误恢复机制
-          if (e is AdbStreamClosed ||
-              e.toString().contains('AdbStreamClosed')) {
-            // ADB流关闭，正常结束
-            print('🔚 ADB流正常关闭');
+          final errorString = e.toString();
+          
+          if (e is AdbStreamClosed || errorString.contains('AdbStreamClosed')) {
+            print('ADB Stream: stream closed normally');
             await _close();
             break;
-          } else if (e.toString().contains('CLSE')) {
-            // 设备主动关闭流，正常结束
-            print('🔚 设备主动关闭ADB流');
+          } else if (errorString.contains('CLSE')) {
+            print('ADB Stream: device closed stream');
             await _close();
             break;
-          } else if (e.toString().contains('TimeoutException')) {
-            // 超时异常，实现指数退避重试
-            _retryCount++;
-            if (_retryCount <= _maxRetries) {
-              final delay = Duration(milliseconds: 500 * _retryCount);
-              print(
-                '⚠️ ADB流读取超时，重试 $_retryCount/$_maxRetries，等待 ${delay.inMilliseconds}ms',
-              );
-              await Future.delayed(delay);
+          } else if (errorString.contains('TimeoutException')) {
+            // For real-time data streams, timeout might be normal as device may not send data temporarily
+            // Add log level check to avoid excessive warning output
+            if (_retryCount % 10 == 0) { // Only warn every 10 retries
+              print('ADB Stream: read timeout, retry $_retryCount/$_maxRetries');
+            }
+            
+            if (await _handleRetryWithBackoff('timeout', _retryBaseDelayMs)) {
               continue;
             } else {
-              print('❌ ADB流读取超时，达到最大重试次数');
+              print('ADB Stream: read timeout, reached maximum retries');
               await _close();
               break;
             }
-          } else if (e.toString().contains('StateError') &&
-              e.toString().contains('消息队列已关闭')) {
-            // 消息队列关闭，连接已断开
-            print('❌ 消息队列已关闭，ADB流终止');
+          } else if (errorString.contains('StateError') && errorString.contains('消息队列已关闭')) {
+            print('ADB Stream: message queue closed, stream terminated');
             await _close();
             break;
           } else {
-            // 其他异常，记录但继续尝试，增加延迟避免快速重试
-            _retryCount++;
-            if (_retryCount <= _maxRetries) {
-              print('⚠️ ADB流读取异常 (重试 $_retryCount/$_maxRetries): $e');
-              await Future.delayed(Duration(milliseconds: 200 * _retryCount));
+            if (await _handleRetryWithBackoff('error', _errorBaseDelayMs)) {
               continue;
             } else {
-              print('❌ ADB流读取异常，达到最大重试次数: $e');
+              print('ADB Stream: read error, reached maximum retries: $e');
               await _close();
               break;
             }
@@ -271,23 +264,17 @@ class AdbStream {
   /// 等待远程ID分配
   /// 当打开流后，设备会响应一个OKAY消息，其中包含远程ID
   Future<void> _waitForRemoteIdAssignment() async {
-    int attempts = 0;
-    const maxAttempts = 3;
-
-    while (attempts < maxAttempts && !_isClosed) {
-      attempts++;
+    for (int attempts = 1; attempts <= _remoteIdAssignmentMaxAttempts && !_isClosed; attempts++) {
       try {
         // 等待OKAY消息，它包含分配给此流的远程ID
         final okayMessage = await _messageQueue.takeWithTimeout(
           _localId,
           AdbProtocol.CMD_OKAY,
-          timeout: Duration(seconds: 5),
+          timeout: Duration(seconds: _remoteIdAssignmentTimeoutSeconds),
         );
         _remoteId = okayMessage.arg0; // arg0 contains the remote ID
 
-        print(
-          '✅ 本地ID 0x${_localId.toRadixString(16)} 成功分配远程ID 0x${_remoteId.toRadixString(16)}',
-        );
+        print('ADB Stream: local ID 0x${_localId.toRadixString(16)} assigned remote ID 0x${_remoteId.toRadixString(16)}');
 
         // 完成远程ID等待
         if (!_remoteIdCompleter.isCompleted) {
@@ -295,9 +282,9 @@ class AdbStream {
         }
         return;
       } catch (e) {
-        print('⚠️ 等待远程ID分配失败 (尝试 $attempts/$maxAttempts): $e');
+        print('ADB Stream: failed to wait for remote ID assignment (attempt $attempts/$_remoteIdAssignmentMaxAttempts): $e');
 
-        if (attempts >= maxAttempts || _isClosed) {
+        if (attempts >= _remoteIdAssignmentMaxAttempts || _isClosed) {
           // 如果达到最大重试次数或流已关闭，完成Completer
           if (!_remoteIdCompleter.isCompleted) {
             _remoteIdCompleter.completeError(e);
@@ -307,7 +294,7 @@ class AdbStream {
 
         // 等待一段时间后重试
         if (!_isClosed) {
-          await Future.delayed(Duration(milliseconds: 1000));
+          await Future.delayed(Duration(seconds: 1));
         }
       }
     }
@@ -323,7 +310,7 @@ class AdbStream {
       try {
         _messageQueue.stopListening(_localId);
       } catch (e) {
-        print('⚠️ 停止监听本地ID时出错: $e');
+        print('ADB Stream: error stopping local ID listener: $e');
       }
 
       // 发送关闭通知
@@ -337,36 +324,48 @@ class AdbStream {
       try {
         await _dataController.close();
       } catch (e) {
-        print('⚠️ 关闭数据流时出错: $e');
+        print('ADB Stream: error closing data stream: $e');
       }
 
       // 关闭关闭流
       try {
         await _closeController.close();
       } catch (e) {
-        print('⚠️ 关闭关闭流时出错: $e');
+        print('ADB Stream: error closing close stream: $e');
       }
     }
   }
 
   /// 分割数据为适合传输的块
   List<Uint8List> _splitData(Uint8List data) {
+    if (data.length <= _chunkSize) {
+      return [data];
+    }
+
     final chunks = <Uint8List>[];
-    var offset = 0;
-
-    // 优化：增大块大小到128KB，提升视频流传输性能
-    const int chunkSize = 128 * 1024; // 128KB
-
-    while (offset < data.length) {
-      final remainingBytes = data.length - offset;
-      final actualChunkSize = remainingBytes > chunkSize
-          ? chunkSize
-          : remainingBytes;
+    for (int offset = 0; offset < data.length; offset += _chunkSize) {
+      final end = offset + _chunkSize;
+      final actualChunkSize = end > data.length ? data.length - offset : _chunkSize;
       chunks.add(data.sublist(offset, offset + actualChunkSize));
-      offset += actualChunkSize;
     }
 
     return chunks;
+  }
+
+  /// 处理带指数退避的重试
+  /// 返回true表示应该继续重试，false表示达到最大重试次数
+  Future<bool> _handleRetryWithBackoff(String errorType, int baseDelayMs) async {
+    _retryCount++;
+    if (_retryCount <= _maxRetries) {
+      final delay = Duration(milliseconds: baseDelayMs * _retryCount);
+      // 减少警告输出频率，只在特定重试次数时输出
+      if (_retryCount == 1 || _retryCount == _maxRetries) {
+        print('ADB Stream: read $errorType, retry $_retryCount/$_maxRetries, waiting ${delay.inMilliseconds}ms');
+      }
+      await Future.delayed(delay);
+      return true;
+    }
+    return false;
   }
 }
 

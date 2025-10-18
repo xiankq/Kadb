@@ -112,7 +112,7 @@ class AdbShellStream {
   /// 开始读取Shell输出
   void _startReading() {
     if (_debug) {
-      print('ADB Shell: 开始读取输出...');
+      print('ADB Shell: starting output reading...');
     }
 
     _adbStream.dataStream.listen(
@@ -131,7 +131,7 @@ class AdbShellStream {
       },
       onDone: () {
         if (_debug) {
-          print('ADB Shell: 输出流结束');
+          print('ADB Shell: output stream ended');
         }
         if (!_isClosed) {
           _close();

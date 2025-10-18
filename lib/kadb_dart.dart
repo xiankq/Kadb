@@ -119,7 +119,7 @@ class KadbDart {
   /// 创建TCP转发器
   /// [connection] ADB连接
   /// [hostPort] 本地端口
-  /// [destination] 目标服务，如 "tcp:8080", "localabstract:scrcpy", "shell:cat"
+  /// [destination] 目标服务，如 "tcp:8080", "localabstract:myservice", "shell:cat"
   ///
   /// 返回可自动关闭的TCP转发器实例
   static TcpForwarder createTcpForwarder(
@@ -147,7 +147,7 @@ class KadbDart {
   /// 启动TCP端口转发（便捷方法）
   /// [connection] ADB连接
   /// [hostPort] 本地端口
-  /// [destination] 目标服务，如 "tcp:8080", "localabstract:scrcpy", "shell:cat"
+  /// [destination] 目标服务，如 "tcp:8080", "localabstract:myservice", "shell:cat"
   ///
   /// 自动启动转发器并返回可关闭的实例
   static Future<TcpForwarder> startTcpForward(

@@ -6,7 +6,7 @@ import 'package:kadb_dart/kadb_dart.dart';
 
 void main() async {
   final host = '192.168.2.32';
-  final port = 5556;
+  final port = 5557;
 
   try {
     final keyPair = await CertUtils.loadKeyPair();

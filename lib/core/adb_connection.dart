@@ -170,23 +170,23 @@ class AdbConnection {
     final tokenData = authMessage.payload.sublist(0, authMessage.payloadLength);
 
     if (_debug) {
-      print('📝 收到认证token，长度: ${tokenData.length}');
+      print('ADB Auth: received token, length: ${tokenData.length}');
       final tokenHex = tokenData
           .map((b) => b.toRadixString(16).padLeft(2, '0'))
           .join(' ');
-      print('📝 Token内容: $tokenHex');
+      print('ADB Auth: token content: $tokenHex');
     }
 
     // 尝试签名认证
     final signature = _keyPair.signAdbMessagePayload(tokenData);
 
     if (_debug) {
-      print('🔐 生成签名，长度: ${signature.length}');
+      print('ADB Auth: generated signature, length: ${signature.length}');
       final sigHex = signature
           .take(8)
           .map((b) => b.toRadixString(16).padLeft(2, '0'))
           .join(' ');
-      print('🔐 签名前8字节: $sigHex');
+      print('ADB Auth: signature first 8 bytes: $sigHex');
     }
 
     // 发送签名响应
@@ -197,7 +197,7 @@ class AdbConnection {
 
     if (responseMessage.command == AdbProtocol.CMD_CNXN) {
       if (_debug) {
-        print('✅ 签名认证成功');
+        print('ADB Auth: signature authentication successful');
       }
       return;
     }
@@ -267,7 +267,7 @@ class AdbConnection {
     stream.closeStream.listen((_) {
       _streams.remove(localId);
       if (_debug) {
-        print('🔧 流 localId=$localId 已自动清理');
+        print('ADB Stream: localId=$localId auto cleaned');
       }
     });
 

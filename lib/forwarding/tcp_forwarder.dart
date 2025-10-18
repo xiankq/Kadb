@@ -42,7 +42,7 @@ class TcpForwarder {
   /// 构造函数 - 任意ADB目标服务
   /// [kadb] ADB连接
   /// [hostPort] 本地端口
-  /// [destination] 目标服务，如 "tcp:8080", "localabstract:scrcpy", "shell:cat"
+  /// [destination] 目标服务，如 "tcp:8080", "localabstract:myservice", "shell:cat"
   TcpForwarder(
     this._kadb,
     this._hostPort,
@@ -86,9 +86,9 @@ class TcpForwarder {
 
       if (_debug) {
         if (_targetPort != null) {
-          print('TCP转发已启动: 本地端口 $_hostPort -> 设备端口 $_targetPort');
+          print('TCP forward started: local port $_hostPort -> device port $_targetPort');
         } else {
-          print('TCP转发已启动: 本地端口 $_hostPort -> 设备服务 $_destination');
+          print('TCP forward started: local port $_hostPort -> device service $_destination');
         }
       }
     } catch (e) {
@@ -111,14 +111,14 @@ class TcpForwarder {
         await adbStream.waitForRemoteId().timeout(Duration(seconds: 5));
       } catch (e) {
         if (_debug) {
-          print('⚠️ 等待远程ID分配失败: $e');
+          print('Warning: Failed to wait for remote ID assignment: $e');
         }
         // 继续尝试，不立即关闭连接
       }
 
       if (_debug) {
         print(
-          '🔗 建立连接: ${client.remoteAddress.address}:${client.remotePort} -> $_destination',
+          'Connection established: ${client.remoteAddress.address}:${client.remotePort} -> $_destination',
         );
       }
 
@@ -126,30 +126,30 @@ class TcpForwarder {
       unawaited(_handleClientForwarding(client, adbStream));
     } catch (e) {
       if (_debug) {
-        print('TCP转发错误: $e');
-        print('目标服务: $_destination');
-        print('客户端地址: ${client.remoteAddress.address}:${client.remotePort}');
+        print('TCP forward error: $e');
+        print('Target service: $_destination');
+        print('Client address: ${client.remoteAddress.address}:${client.remotePort}');
       }
 
-      // 提供更友好的错误信息
+      // 提供通用的错误信息
       String errorMsg = e.toString();
       if (errorMsg.contains('TimeoutException')) {
         if (_destination.startsWith('localabstract:')) {
           final serviceName = _destination.split(':')[1];
-          print('⚠️ 连接Android服务超时: $serviceName');
-          print('💡 可能的原因：');
-          print('   1. scrcpy服务未启动或正在启动中');
-          print('   2. 设备上没有安装scrcpy-server');
-          print('   3. 服务名称不正确');
+          print('Warning: Connection timeout to Android service: $serviceName');
+          print('Possible causes:');
+          print('   1. Target service not started or starting');
+          print('   2. Service name incorrect');
+          print('   3. Target service may be handling other connections');
         } else if (_destination.startsWith('tcp:')) {
           final port = _destination.split(':')[1];
-          print('⚠️ 连接设备TCP端口超时: $port');
-          print('💡 可能的原因：');
-          print('   1. 设备上该端口没有服务在监听');
-          print('   2. 防火墙阻止了连接');
-          print('   3. 网络连接问题');
+          print('Warning: Connection timeout to device TCP port: $port');
+          print('Possible causes:');
+          print('   1. No service listening on target port');
+          print('   2. Firewall blocking connection');
+          print('   3. Network connectivity issue');
         }
-        print('💡 转发器继续运行，等待其他连接尝试...');
+        print('Forwarder continues running, waiting for other connection attempts...');
         // 不重新抛出异常，继续运行转发器
         return;
       } else if (errorMsg.contains('AdbStreamClosed') || e is AdbStreamClosed) {
@@ -194,11 +194,11 @@ class TcpForwarder {
     } catch (e) {
       if (_debug) {
         if (e is AdbStreamClosed) {
-          print('⚠️ 数据转发过程中ADB流关闭，这可能是正常的连接断开');
+          print('ADB stream closed during data forwarding (normal connection termination)');
         } else if (e.toString().contains('AdbStreamClosed')) {
-          print('⚠️ 数据转发过程中检测到ADB流关闭异常: $e');
+          print('ADB stream closed exception detected during data forwarding: $e');
         } else {
-          print('⚠️ 数据转发过程中发生错误: $e');
+          print('Error during data forwarding: $e');
         }
       }
       // 不重新抛出异常，继续执行清理逻辑
@@ -215,7 +215,7 @@ class TcpForwarder {
       await client.close();
     } catch (e) {
       if (_debug) {
-        print('⚠️ 关闭客户端连接时出错: $e');
+        print('Error closing client connection: $e');
       }
     }
 
@@ -224,7 +224,7 @@ class TcpForwarder {
       await adbStream.close();
     } catch (e) {
       if (_debug) {
-        print('⚠️ 关闭ADB流时出错: $e');
+        print('Error closing ADB stream: $e');
       }
     }
   }
@@ -232,109 +232,85 @@ class TcpForwarder {
   /// 处理服务器错误
   void _handleServerError(Object error) {
     if (_debug) {
-      print('TCP转发服务器错误: $error');
+      print('TCP forward server error: $error');
     }
     if (_state == TcpForwarderState.started) {
       _moveToState(TcpForwarderState.stopped);
     }
   }
 
-  /// 从Socket转发数据到ADB流（优化缓冲区大小，提升视频流性能）
+  /// 从Socket转发数据到ADB流（性能优化版本）
   Future<void> _forwardDataFromSocket(Socket source, AdbStreamSink sink) async {
     try {
       final socketStream = source.asBroadcastStream();
       await for (final data in socketStream) {
-        // 优化：使用64KB缓冲区，减少flush调用频率
-        const int bufferSize = 64 * 1024; // 64KB
-        for (int i = 0; i < data.length; i += bufferSize) {
-          final end = (i + bufferSize < data.length)
-              ? i + bufferSize
-              : data.length;
-          final chunk = data.sublist(i, end);
-
-          try {
-            await sink.writeBytes(chunk);
-            // 只在数据块末尾flush，减少系统调用
-            if (end == data.length) {
-              await sink.flush();
-            }
-            if (_debug && chunk.isNotEmpty) {
-              print(
-                '📤 Socket->ADB: 发送 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}',
-              );
-            }
-          } catch (e) {
-            if (e.toString().contains('AdbStreamClosed') || e is AdbStreamClosed) {
-              print('🔚 Socket->ADB: ADB流已关闭，停止转发');
-              return;
-            } else if (e.toString().contains('StateError') && e.toString().contains('流已关闭')) {
-              print('🔚 Socket->ADB: 流已关闭，停止转发');
-              return;
-            } else {
-              print('⚠️ Socket->ADB: 写入数据时出错: $e');
-              // 继续尝试，可能是暂时性问题
-              await Future.delayed(Duration(milliseconds: 100));
-              continue;
-            }
+        // 优化：直接发送整个数据块，避免分块延迟
+        try {
+          await sink.writeBytes(data);
+          // 移除flush调用，减少系统调用开销
+          if (_debug && data.isNotEmpty) {
+            print(
+              'Socket->ADB: sent ${data.length} bytes',
+            );
+          }
+        } catch (e) {
+          if (e.toString().contains('AdbStreamClosed') || e is AdbStreamClosed) {
+            print('Socket->ADB: ADB stream closed, stopping forward');
+            return;
+          } else if (e.toString().contains('StateError') && e.toString().contains('流已关闭')) {
+            print('Socket->ADB: stream closed, stopping forward');
+            return;
+          } else {
+            print('Socket->ADB: error writing data: $e');
+            // 移除延迟重试，直接返回
+            return;
           }
         }
       }
     } catch (e) {
       if (_debug) {
         if (e.toString().contains('SocketException')) {
-          print('🔚 Socket->ADB: Socket连接断开，正常结束');
+          print('Socket->ADB: socket connection closed (normal termination)');
         } else {
-          print('⚠️ Socket->ADB: 转发过程中出错: $e');
+          print('Socket->ADB: error during forwarding: $e');
         }
       }
     }
   }
 
-  /// 从ADB流转发数据到Socket（优化缓冲区大小，提升视频流性能）
+  /// 从ADB流转发数据到Socket（性能优化版本）
   Future<void> _forwardDataFromAdbStream(
     AdbStreamSource source,
     Socket sink,
   ) async {
     try {
       await for (final data in source.stream) {
-        // 优化：使用64KB缓冲区，减少flush调用频率
-        const int bufferSize = 64 * 1024; // 64KB
-        for (int i = 0; i < data.length; i += bufferSize) {
-          final end = (i + bufferSize < data.length)
-              ? i + bufferSize
-              : data.length;
-          final chunk = data.sublist(i, end);
-
-          try {
-            sink.add(chunk);
-            // 只在数据块末尾flush，减少系统调用
-            if (end == data.length) {
-              await sink.flush();
-            }
-            if (_debug && chunk.isNotEmpty) {
-              print(
-                '📥 ADB->Socket: 接收 ${chunk.length} 字节, 前16字节: ${chunk.take(16).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}',
-              );
-            }
-          } catch (e) {
-            if (e.toString().contains('SocketException')) {
-              print('🔚 ADB->Socket: Socket连接断开，停止转发');
-              return;
-            } else {
-              print('⚠️ ADB->Socket: 写入数据时出错: $e');
-              // 继续尝试，可能是暂时性问题
-              await Future.delayed(Duration(milliseconds: 100));
-              continue;
-            }
+        // 优化：直接发送整个数据块，避免分块延迟
+        try {
+          sink.add(data);
+          // 移除flush调用，减少系统调用开销
+          if (_debug && data.isNotEmpty) {
+            print(
+              'ADB->Socket: received ${data.length} bytes',
+            );
+          }
+        } catch (e) {
+          if (e.toString().contains('SocketException')) {
+            print('ADB->Socket: socket connection closed, stopping forward');
+            return;
+          } else {
+            print('ADB->Socket: error writing data: $e');
+            // 移除延迟重试，直接返回
+            return;
           }
         }
       }
     } catch (e) {
       if (_debug) {
         if (e.toString().contains('AdbStreamClosed') || e.toString().contains('StateError')) {
-          print('🔚 ADB->Socket: ADB流已关闭，正常结束');
+          print('ADB->Socket: ADB stream closed (normal termination)');
         } else {
-          print('⚠️ ADB->Socket: 转发过程中出错: $e');
+          print('ADB->Socket: error during forwarding: $e');
         }
       }
     }
@@ -377,9 +353,9 @@ class TcpForwarder {
       _moveToState(TcpForwarderState.stopped);
       if (_debug) {
         if (_targetPort != null) {
-          print('TCP转发已停止: 端口 $_hostPort');
+          print('TCP forward stopped: port $_hostPort');
         } else {
-          print('TCP转发已停止: 本地端口 $_hostPort');
+          print('TCP forward stopped: local port $_hostPort');
         }
       }
     } catch (e) {
@@ -487,7 +463,7 @@ class ReverseTcpForwarder {
       _server!.listen(_handleReverseConnection);
 
       if (_debug) {
-        print('反向TCP转发已启动: 设备端口 $_devicePort -> 本地端口 $_hostPort');
+        print('Reverse TCP forward started: device port $_devicePort -> local port $_hostPort');
       }
     } catch (e) {
       _moveToState(TcpForwarderState.stopped);
@@ -509,7 +485,7 @@ class ReverseTcpForwarder {
       await _setupBidirectionalForwarding(client, adbStream);
     } catch (e) {
       if (_debug) {
-        print('反向TCP转发错误: $e');
+        print('Reverse TCP forward error: $e');
       }
       // 确保在出错时关闭客户端连接
       try {
@@ -594,7 +570,7 @@ class ReverseTcpForwarder {
 
       _moveToState(TcpForwarderState.stopped);
       if (_debug) {
-        print('反向TCP转发已停止: 端口 $_hostPort');
+        print('Reverse TCP forward stopped: port $_hostPort');
       }
     } catch (e) {
       _moveToState(TcpForwarderState.stopped);
