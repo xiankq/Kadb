@@ -19,8 +19,8 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   void initState() {
     super.initState();
     debugPrint('ConnectionScreen 初始化');
-    _ipController.text = '192.168.2.32';
-    _portController.text = '5556';
+    _ipController.text = '192.168.10.204';
+    _portController.text = '5555';
   }
 
   @override

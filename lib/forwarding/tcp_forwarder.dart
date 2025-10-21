@@ -301,8 +301,10 @@ class TcpForwarder {
         // 平衡实时性和数据完整性
         try {
           // 小数据包直接发送，避免缓冲延迟
-          unawaited(sink.writeBytes(data).then((_) => sink.flush()));
-          continue;
+          if (data.length < 1024) {
+            unawaited(sink.writeBytes(data).then((_) => sink.flush()));
+            continue;
+          }
 
           // 大数据包直接发送，避免缓冲
           if (data.length > maxBufferSize) {
@@ -375,9 +377,11 @@ class TcpForwarder {
         // 极致实时性：零延迟处理
         try {
           // 小数据包直接发送，避免缓冲延迟
-          sink.add(data);
-          sink.flush();
-          continue;
+          if (data.length < 1024) {
+            sink.add(data);
+            sink.flush();
+            continue;
+          }
 
           // 中等大小数据包极小缓冲
           buffer.add(data);

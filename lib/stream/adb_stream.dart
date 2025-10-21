@@ -207,11 +207,15 @@ class AdbStream {
         // 重置重试计数器
         _retryCount = 0;
 
-        // 接收到数据 - 零拷贝优化
+        // 接收到数据 - 避免不必要的拷贝
         if (message.payload.isNotEmpty) {
-          // 避免不必要的拷贝 - 直接传递数据
-          final payloadUint8 = Uint8List.fromList(message.payload);
-          _dataController.add(payloadUint8);
+          // 如果已经是Uint8List，直接使用；否则进行转换
+          if (message.payload is Uint8List) {
+            _dataController.add(message.payload as Uint8List);
+          } else {
+            final payloadUint8 = Uint8List.fromList(message.payload);
+            _dataController.add(payloadUint8);
+          }
         }
 
         // 发送确认

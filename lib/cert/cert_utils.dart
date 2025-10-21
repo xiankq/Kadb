@@ -475,6 +475,7 @@ class _SimpleRSAPrivateKey implements RSAPrivateKey {
   final BigInt privateExponent;
   @override
   final BigInt p;
+  @override
   final BigInt q;
 
   _SimpleRSAPrivateKey(

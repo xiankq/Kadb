@@ -1,4 +1,3 @@
-import 'dart:ffi';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -30,15 +29,21 @@ class _VideoScreenState extends State<VideoScreen> {
       debugPrint('🎬 初始化FVP播放器...');
 
       // 极致低延迟优化：接近零缓冲
-      _player.setBufferRange(min: 0, max: 0, drop: false);
+      _player.setBufferRange(min: 0, max: 0, drop: true);
 
       // 设置TCP协议支持和H264流优化
       // _player.setProperty('demux.buffer.protocols', 'tcp');
 
       // 硬件解码器绝对优先
       _player.setDecoders(MediaType.video, [
-        'FFmpeg',
         'AMediaCodec',
+        'FFmpeg',
+        'h264_mmal',
+        'h264_cuvid',
+      ]);
+      _player.setDecoders(MediaType.audio, [
+        'AMediaCodec',
+        'FFmpeg',
         'h264_mmal',
         'h264_cuvid',
       ]);
@@ -58,15 +63,6 @@ class _VideoScreenState extends State<VideoScreen> {
 
       // 添加播放器状态回调
       _player.onStateChanged((oldValue, newValue) {});
-
-      // 添加事件回调
-      _player.onEvent((event) {
-        // 只在解码器错误时处理并打印
-        if (event.category == 'decoder.video' && event.error != 0) {
-          debugPrint('🔧 解码器错误，切换解码器');
-          _switchDecoder();
-        }
-      });
 
       debugPrint('✅ MDK播放器参数设置完成');
 

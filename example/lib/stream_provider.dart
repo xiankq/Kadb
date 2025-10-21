@@ -125,7 +125,7 @@ class VideoStreamProvider with ChangeNotifier {
         'audio=false '
         'control=false '
         'cleanup=false '
-        'raw_stream=false ';
+        'raw_stream=true ';
     // 'max_size=1920 ' // 恢复1920分辨率
     // 'bit_rate=1000000 ' // 提高到8Mbps码率，支持高分辨率高帧率
     // 'max_fps=60'; // 恢复60fps
