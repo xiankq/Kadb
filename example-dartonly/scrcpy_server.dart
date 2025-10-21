@@ -21,8 +21,8 @@ void main() async {
     final keyPair = await CertUtils.loadKeyPair();
 
     connection = await KadbDart.create(
-      host: '192.168.2.32',
-      port: 5557,
+      host: '100.123.66.1',
+      port: 5555,
       keyPair: keyPair,
       debug: false,
       ioTimeoutMs: 30000,

@@ -296,7 +296,7 @@ class CertUtils {
     );
   }
 
-  /// 编码私钥为PEM格式 (PKCS#8格式，与官方ADB一致)
+  /// 编码私钥为PEM格式
   static String _encodePrivateKeyPem(RSAPrivateKey privateKey) {
     final derBytes = _encodePrivateKeyDer(privateKey);
     final base64Content = base64.encode(derBytes);
@@ -316,7 +316,7 @@ class CertUtils {
     return pem.toString();
   }
 
-  /// 编码私钥为DER格式 (PKCS#8格式)
+  /// 编码私钥为DER格式
   static Uint8List _encodePrivateKeyDer(RSAPrivateKey privateKey) {
     final sequence = asn1.ASN1Sequence();
 
@@ -331,23 +331,21 @@ class CertUtils {
     algorithmSequence.add(asn1.ASN1Null());
     sequence.add(algorithmSequence);
 
-    // 私钥数据 - PKCS#1格式的RSA私钥
+    // 私钥数据
     final privateKeySequence = asn1.ASN1Sequence();
     privateKeySequence.add(asn1.ASN1Integer(BigInt.zero)); // 版本
-    privateKeySequence.add(asn1.ASN1Integer(privateKey.modulus ?? BigInt.zero)); // n
-    privateKeySequence.add(asn1.ASN1Integer(BigInt.from(65537))); // e (固定公钥指数)
-    privateKeySequence.add(asn1.ASN1Integer(privateKey.privateExponent ?? BigInt.one)); // d
-
-    // CRT参数
-    final p = privateKey.p ?? BigInt.one;
-    final q = privateKey.q ?? BigInt.one;
-    final d = privateKey.privateExponent ?? BigInt.one;
-
-    privateKeySequence.add(asn1.ASN1Integer(p)); // p
-    privateKeySequence.add(asn1.ASN1Integer(q)); // q
-    privateKeySequence.add(asn1.ASN1Integer(d % (p - BigInt.one))); // d mod (p-1)
-    privateKeySequence.add(asn1.ASN1Integer(d % (q - BigInt.one))); // d mod (q-1)
-    privateKeySequence.add(asn1.ASN1Integer(_modInverse(q, p))); // q^-1 mod p
+    privateKeySequence.add(asn1.ASN1Integer(privateKey.modulus ?? BigInt.zero));
+    privateKeySequence.add(
+      asn1.ASN1Integer(privateKey.exponent ?? BigInt.from(65537)),
+    );
+    privateKeySequence.add(
+      asn1.ASN1Integer(privateKey.privateExponent ?? BigInt.one),
+    );
+    privateKeySequence.add(asn1.ASN1Integer(privateKey.p ?? BigInt.one));
+    privateKeySequence.add(asn1.ASN1Integer(privateKey.q ?? BigInt.one));
+    privateKeySequence.add(asn1.ASN1Integer(BigInt.one));
+    privateKeySequence.add(asn1.ASN1Integer(BigInt.one));
+    privateKeySequence.add(asn1.ASN1Integer(BigInt.one));
 
     final privateKeyOctet = asn1.ASN1OctetString(
       privateKeySequence.encodedBytes,
@@ -375,31 +373,6 @@ class CertUtils {
     }
 
     return Uint8List.fromList(bytes);
-  }
-
-  /// 计算模逆运算 (a^-1 mod m) - 扩展欧几里得算法
-  static BigInt _modInverse(BigInt a, BigInt m) {
-    a = a % m;
-    BigInt m0 = m;
-    BigInt x0 = BigInt.zero;
-    BigInt x1 = BigInt.one;
-
-    while (m > BigInt.one) {
-      BigInt q = a ~/ m;
-      BigInt t = m;
-
-      m = a % m;
-      a = t;
-      t = x0;
-      x0 = x1 - q * x0;
-      x1 = t;
-    }
-
-    if (x1 < BigInt.zero) {
-      x1 += m0;
-    }
-
-    return x1;
   }
 
   /// 验证RSA密钥参数完整性（防止时间退化的关键修复）
