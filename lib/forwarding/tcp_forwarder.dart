@@ -107,13 +107,27 @@ class TcpForwarder {
       adbStream = await _kadb.open(_destination);
 
       // 等待远程ID分配，确保流已正确建立
+      // scrcpy服务器需要客户端连接后才会完全启动，所以需要更长的等待时间
       try {
-        await adbStream.waitForRemoteId().timeout(Duration(seconds: 5));
+        await adbStream.waitForRemoteId().timeout(Duration(seconds: 15));
+        if (_debug) {
+          print('✅ 远程ID分配成功，scrcpy服务器已连接');
+        }
       } catch (e) {
         if (_debug) {
           print('警告: 等待远程ID分配失败: $e');
         }
-        // 继续尝试，不立即关闭连接
+        // 对于scrcpy服务，这是正常情况 - 服务器可能还没启动
+        if (e.toString().contains('TimeoutException') || e.toString().contains('AdbStreamClosed')) {
+          if (_debug) {
+            print('⏳ scrcpy服务器尚未连接，这是正常的，等待服务器启动后客户端会重新连接...');
+          }
+          // 不抛出异常，TCP转发器会继续运行等待连接
+          return; // 直接返回，不继续处理这个连接
+        } else {
+          // 其他类型的错误，重新抛出
+          rethrow;
+        }
       }
 
       // 优化：为视频流设置Socket缓冲区

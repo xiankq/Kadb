@@ -248,14 +248,14 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                             Row(
                               children: [
                                 const Icon(
-                                  Icons.http,
+                                  Icons.settings_ethernet,
                                   color: Colors.blue,
                                   size: 16,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'HTTP端口: ${streamProvider.httpPort}',
+                                    'TCP端口: ${streamProvider.tcpPort}',
                                     style: const TextStyle(fontSize: 12),
                                   ),
                                 ),
@@ -264,24 +264,15 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                             const SizedBox(height: 4),
                             Row(
                               children: [
-                                Icon(
-                                  streamProvider.httpConverter?.isConnected ==
-                                          true
-                                      ? Icons.link
-                                      : Icons.link_off,
-                                  color:
-                                      streamProvider
-                                              .httpConverter
-                                              ?.isConnected ==
-                                          true
-                                      ? Colors.green
-                                      : Colors.orange,
+                                const Icon(
+                                  Icons.link,
+                                  color: Colors.green,
                                   size: 16,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'HTTP转换器: ${streamProvider.httpConverter?.isConnected == true ? "已连接" : "连接中"}',
+                                    'TCP直接连接',
                                     style: const TextStyle(fontSize: 12),
                                   ),
                                 ),

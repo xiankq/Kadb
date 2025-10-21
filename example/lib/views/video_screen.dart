@@ -29,13 +29,35 @@ class _VideoScreenState extends State<VideoScreen> {
     try {
       debugPrint('🎬 初始化FVP播放器...');
 
+      // 优化缓冲区设置，适用于实时流
       _player.setBufferRange(min: 0, max: 0, drop: true);
 
-      // 设置解码器
-
+      // 设置TCP协议支持和H264流优化
+      _player.setProperty('demux.buffer.protocols', 'tcp');
+      _player.setDecoders(MediaType.video, ['AMediaCodec', 'FFmpeg', 'dav1d']);
       // 添加媒体状态回调
       _player.onMediaStatus((oldValue, newValue) {
         debugPrint('📊 媒体状态变化: $oldValue -> $newValue');
+
+        // 详细状态检查
+        if (newValue.test(MediaStatus.loaded)) {
+          debugPrint('✅ 媒体已加载');
+          final mediaInfo = _player.mediaInfo;
+          debugPrint('🎬 媒体信息: ${mediaInfo.format}');
+          if (mediaInfo.video != null && mediaInfo.video!.isNotEmpty) {
+            final video = mediaInfo.video!.first;
+            debugPrint(
+              '🎥 视频信息: ${video.codec.codec} ${video.codec.width}x${video.codec.height} ${video.codec.frameRate}fps',
+            );
+          }
+        } else if (newValue.test(MediaStatus.loading)) {
+          debugPrint('⏳ 媒体正在加载...');
+        } else if (newValue.test(MediaStatus.stalled)) {
+          debugPrint('⚠️ 媒体加载停滞');
+        } else if (newValue.test(MediaStatus.invalid)) {
+          debugPrint('❌ 媒体无效');
+        }
+
         return true;
       });
 
@@ -53,7 +75,7 @@ class _VideoScreenState extends State<VideoScreen> {
 
       debugPrint('✅ MDK播放器参数设置完成');
 
-      // 延迟启动播放，确保HTTP端口准备就绪
+      // 延迟启动播放，确保TCP端口准备就绪
       await Future.delayed(const Duration(seconds: 2));
       await _startVideoPlayback();
     } catch (e) {
@@ -76,61 +98,37 @@ class _VideoScreenState extends State<VideoScreen> {
       return;
     }
 
-    // 只使用HTTP流
-    if (streamProvider.httpPort == 0 || streamProvider.httpConverter == null) {
-      debugPrint(
-        '❌ HTTP转换器不可用: port=${streamProvider.httpPort}, converter=${streamProvider.httpConverter != null}',
-      );
-      _showError('HTTP转换器不可用');
+    // 检查TCP端口
+    if (streamProvider.tcpPort == 0) {
+      debugPrint('❌ TCP端口不可用');
+      _showError('TCP端口不可用');
       return;
     }
 
-    final httpUrl = streamProvider.httpConverter!.httpUrl;
-    debugPrint('🌐 使用HTTP流: $httpUrl');
+    final tcpUrl = streamProvider.tcpUrl;
+    debugPrint('🌐 使用TCP流: $tcpUrl');
 
-    // 等待HTTP转换器连接
-    int waitCount = 0;
-    const maxWait = 20; // 增加等待时间
+    // 等待TCP流稳定
+    debugPrint('⏳ 等待TCP流稳定...');
+    await Future.delayed(const Duration(seconds: 3));
 
-    debugPrint('⏳ 开始等待HTTP转换器连接...');
-    while (!streamProvider.httpConverter!.isConnected && waitCount < maxWait) {
-      await Future.delayed(const Duration(seconds: 1));
-      waitCount++;
-      debugPrint(
-        '⏳ 等待HTTP转换器连接... (${waitCount}/${maxWait}) - 连接状态: ${streamProvider.httpConverter!.isConnected}',
-      );
-
-      // 检查流是否还在运行
-      if (!streamProvider.isStreaming) {
-        debugPrint('❌ 等待过程中视频流停止了');
-        _showError('视频流在等待过程中停止了');
-        return;
-      }
-    }
-
-    if (!streamProvider.httpConverter!.isConnected) {
-      debugPrint('❌ HTTP转换器无法连接到TCP流，等待超时');
-      _showError('HTTP转换器无法连接到TCP流');
-      return;
-    }
-
-    debugPrint('✅ HTTP转换器连接成功，开始设置播放器...');
+    debugPrint('✅ TCP流应该已经稳定，开始设置播放器...');
 
     // 设置播放器参数
     try {
       _player.loop = -1; // 无限循环
       debugPrint('🎛️ 播放器参数设置完成');
 
-      // 尝试播放HTTP流
-      debugPrint('🎥 尝试播放HTTP流: $httpUrl');
-      bool success = await _tryPlayUrl(httpUrl);
+      // 尝试播放TCP流
+      debugPrint('🎥 尝试播放TCP流: $tcpUrl');
+      bool success = await _tryPlayUrl(tcpUrl);
 
       if (success) {
         setState(() {
-          _currentUrl = httpUrl;
+          _currentUrl = tcpUrl;
           _isInitialized = true;
         });
-        debugPrint('✅ HTTP流播放成功，当前URL: $_currentUrl');
+        debugPrint('✅ TCP流播放成功，当前URL: $_currentUrl');
       } else {
         debugPrint('❌ 无法播放HTTP视频流');
         _showError('无法播放HTTP视频流');
@@ -144,17 +142,41 @@ class _VideoScreenState extends State<VideoScreen> {
   Future<bool> _tryPlayUrl(String url) async {
     try {
       debugPrint('🎬 开始设置播放器媒体: $url');
-      _player.media = url;
-      debugPrint('✅ 媒体设置完成');
 
-      // 先准备媒体，然后再播放
-      debugPrint('🔄 准备媒体...');
-      final prepareResult = await _player.prepare();
-      debugPrint('📊 媒体准备结果: $prepareResult');
+      // 从URL中提取端口号
+      final portRegex = RegExp(r':(\d+)');
+      final match = portRegex.firstMatch(url);
+      final port = match?.group(1) ?? '0';
 
-      if (prepareResult < 0) {
-        debugPrint('❌ 媒体准备失败，错误码: $prepareResult');
-        return false;
+      // 尝试多种URL格式，确保兼容性
+      final urls = [
+        url, // 原始URL
+        'tcp://127.0.0.1:$port', // 简化格式
+        'tcp://localhost:$port', // localhost格式
+      ];
+
+      for (int attempt = 0; attempt < urls.length; attempt++) {
+        final testUrl = urls[attempt];
+        debugPrint('🔄 尝试URL格式 ${attempt + 1}/${urls.length}: $testUrl');
+
+        _player.media = testUrl;
+        debugPrint('✅ 媒体设置完成');
+
+        // 先准备媒体，然后再播放
+        debugPrint('🔄 准备媒体...');
+        final prepareResult = await _player.prepare();
+        debugPrint('📊 媒体准备结果: $prepareResult');
+
+        if (prepareResult >= 0) {
+          debugPrint('✅ 媒体准备成功');
+          break;
+        } else {
+          debugPrint('⚠️ 媒体准备失败，错误码: $prepareResult，尝试下一种URL格式');
+          if (attempt == urls.length - 1) {
+            return false;
+          }
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
       }
 
       debugPrint('▶️ 设置播放状态为播放');
@@ -163,40 +185,71 @@ class _VideoScreenState extends State<VideoScreen> {
       debugPrint('🔄 更新纹理');
       await _player.updateTexture();
 
-      // 等待更长时间检查是否播放成功
+      // 等待更长时间检查是否播放成功，但增加更详细的状态检查
       debugPrint('⏳ 等待播放器初始化...');
-      for (int i = 0; i < 20; i++) {
-        // 增加到20次检查，每次1秒
+      bool hasData = false;
+      int stallCount = 0;
+
+      for (int i = 0; i < 30; i++) {
         await Future.delayed(const Duration(seconds: 1));
         final textureId = _player.textureId.value;
         final mediaStatus = _player.mediaStatus;
         final playerState = _player.state;
+        final buffered = _player.buffered();
 
-        debugPrint('🔍 检查纹理ID (第${i + 1}次): $textureId');
-        debugPrint('📊 媒体状态: $mediaStatus');
-        debugPrint('🎮 播放器状态: $playerState');
+        debugPrint('🔍 检查播放状态 (第${i + 1}次):');
+        debugPrint('   纹理ID: $textureId');
+        debugPrint('   媒体状态: $mediaStatus');
+        debugPrint('   播放器状态: $playerState');
+        debugPrint('   缓冲数据: ${buffered}ms');
 
         // 检查媒体状态
         if (mediaStatus.test(MediaStatus.loaded)) {
           debugPrint('✅ 媒体已加载');
+          hasData = true;
+          stallCount = 0;
         } else if (mediaStatus.test(MediaStatus.loading)) {
           debugPrint('⏳ 媒体正在加载...');
+          stallCount = 0;
         } else if (mediaStatus.test(MediaStatus.stalled)) {
           debugPrint('⚠️ 媒体加载停滞');
+          stallCount++;
+          if (stallCount > 5) {
+            debugPrint('❌ 媒体停滞时间过长，尝试重新准备');
+            final retryResult = await _player.prepare();
+            if (retryResult >= 0) {
+              stallCount = 0;
+            }
+          }
         } else if (mediaStatus.test(MediaStatus.invalid)) {
           debugPrint('❌ 媒体无效');
           return false;
+        }
+
+        // 检查是否有缓冲数据
+        if (buffered > 0) {
+          debugPrint('✅ 检测到缓冲数据: ${buffered}ms');
+          hasData = true;
         }
 
         if (textureId != null) {
           debugPrint('✅ 播放器纹理ID已生成: $textureId');
           return true;
         }
+
+        // 如果超过10秒没有任何进展，尝试重新设置播放器
+        if (i > 10 && !hasData) {
+          debugPrint('⚠️ 10秒内无进展，尝试重新设置媒体');
+          _player.media = url;
+          await _player.prepare();
+          _player.state = PlaybackState.playing;
+        }
       }
 
       debugPrint('❌ 播放器未能生成纹理ID');
       debugPrint('📊 最终媒体状态: ${_player.mediaStatus}');
       debugPrint('🎮 最终播放器状态: ${_player.state}');
+      debugPrint('📊 最终缓冲数据: ${_player.buffered()}ms');
       return false;
     } catch (e) {
       debugPrint('❌ 播放URL失败: $url');
@@ -204,6 +257,15 @@ class _VideoScreenState extends State<VideoScreen> {
       debugPrint('❌ 播放器状态: ${_player.state}');
       debugPrint('❌ 纹理ID: ${_player.textureId.value}');
       debugPrint('❌ 媒体状态: ${_player.mediaStatus}');
+
+      // 尝试获取更详细的错误信息
+      try {
+        final mediaInfo = _player.mediaInfo;
+        debugPrint('📊 媒体信息: $mediaInfo');
+      } catch (_) {
+        debugPrint('📊 无法获取媒体信息');
+      }
+
       return false;
     }
   }
@@ -265,7 +327,7 @@ class _VideoScreenState extends State<VideoScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('设备投屏 - HTTP'),
+        title: const Text('设备投屏 - TCP'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         actions: [
@@ -324,10 +386,7 @@ class _VideoScreenState extends State<VideoScreen> {
                             );
                           }
 
-                          return AspectRatio(
-                            aspectRatio: 16 / 9, // 默认比例
-                            child: Texture(textureId: textureId),
-                          );
+                          return Texture(textureId: textureId);
                         },
                       );
                     },
@@ -362,13 +421,10 @@ class _VideoScreenState extends State<VideoScreen> {
           children: [
             Text('状态: ${streamProvider.streamStatus}'),
             Text('TCP端口: ${streamProvider.tcpPort}'),
-            Text('HTTP端口: ${streamProvider.httpPort}'),
-            Text('HTTP URL: ${streamProvider.httpConverter?.httpUrl ?? "未知"}'),
+            Text('TCP端口: ${streamProvider.tcpPort}'),
+            Text('TCP URL: ${streamProvider.tcpUrl}'),
             Text('是否流式传输: ${streamProvider.isStreaming ? "是" : "否"}'),
-            Text(
-              'HTTP转换器状态: ${streamProvider.httpConverter?.isConnected == true ? "已连接" : "未连接"}',
-            ),
-            Text('播放方式: HTTP转发'),
+            Text('播放方式: TCP直接连接'),
             Text('当前URL: $_currentUrl'),
             Text('播放器状态: ${_player.state.toString()}'),
           ],
