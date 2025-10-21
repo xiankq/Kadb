@@ -1,6 +1,8 @@
+import 'dart:ffi';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:video_player/video_player.dart';
+import 'package:fvp/mdk.dart';
 import '../connection_provider.dart';
 import '../stream_provider.dart';
 import 'connection_screen.dart';
@@ -13,11 +15,9 @@ class VideoScreen extends StatefulWidget {
 }
 
 class _VideoScreenState extends State<VideoScreen> {
-  VideoPlayerController? _videoController;
-  bool _isPlayerReady = false;
-  bool _isPlaying = false;
-  bool _hasError = false;
-  String _errorMessage = '';
+  late final Player _player = Player();
+  bool _isInitialized = false;
+  String _currentUrl = '';
 
   @override
   void initState() {
@@ -29,10 +29,36 @@ class _VideoScreenState extends State<VideoScreen> {
     try {
       debugPrint('🎬 初始化FVP播放器...');
 
-      // 延迟启动播放，确保TCP端口准备就绪
+      _player.setBufferRange(min: 0, max: 0, drop: true);
+
+      // 设置解码器
+
+      // 添加媒体状态回调
+      _player.onMediaStatus((oldValue, newValue) {
+        debugPrint('📊 媒体状态变化: $oldValue -> $newValue');
+        return true;
+      });
+
+      // 添加播放器状态回调
+      _player.onStateChanged((oldValue, newValue) {
+        debugPrint('🎮 播放器状态变化: $oldValue -> $newValue');
+      });
+
+      // 添加事件回调
+      _player.onEvent((event) {
+        debugPrint(
+          '📢 播放器事件: 错误=${event.error}, 类别=${event.category}, 详情=${event.detail}',
+        );
+      });
+
+      debugPrint('✅ MDK播放器参数设置完成');
+
+      // 延迟启动播放，确保HTTP端口准备就绪
+      await Future.delayed(const Duration(seconds: 2));
       await _startVideoPlayback();
     } catch (e) {
-      _handleError('播放器初始化失败: $e');
+      debugPrint('❌ 播放器初始化失败: $e');
+      _showError('播放器初始化失败: $e');
     }
   }
 
@@ -40,132 +66,155 @@ class _VideoScreenState extends State<VideoScreen> {
     if (!mounted) return;
 
     final streamProvider = context.read<VideoStreamProvider>();
-    if (!streamProvider.isStreaming || streamProvider.httpPort == 0) {
-      debugPrint('视频流未准备好');
+    debugPrint(
+      '🔍 检查流状态: isStreaming=${streamProvider.isStreaming}, status=${streamProvider.streamStatus}',
+    );
+
+    if (!streamProvider.isStreaming) {
+      debugPrint('⚠️ 视频流未准备好，状态: ${streamProvider.streamStatus}');
+      _showError('视频流未准备好: ${streamProvider.streamStatus}');
       return;
     }
 
-    final httpPort = streamProvider.httpPort;
-    final httpUrl = streamProvider.httpConverter?.httpUrl ?? 'http://127.0.0.1:$httpPort';
-
-    debugPrint('准备连接HTTP端口: $httpPort');
-    debugPrint('HTTP URL: $httpUrl');
-
-    try {
-      // 等待HTTP转换器连接成功
-      debugPrint('等待HTTP转换器连接TCP流...');
-      int waitCount = 0;
-      const maxWait = 10; // 最多等待10秒
-      
-      while (!streamProvider.httpConverter!.isConnected && waitCount < maxWait) {
-        await Future.delayed(Duration(seconds: 1));
-        waitCount++;
-        debugPrint('等待HTTP转换器连接... (${waitCount}/${maxWait})');
-      }
-      
-      if (!streamProvider.httpConverter!.isConnected) {
-        throw Exception('HTTP转换器无法连接到TCP流');
-      }
-      
-      debugPrint('HTTP转换器连接成功，等待更长时间让视频流稳定...');
-
-      // 延迟更长时间给视频流更多时间稳定
-      await Future.delayed(Duration(seconds: 3));
-      debugPrint('等待完成，开始播放');
-
-      // 创建视频控制器并连接到HTTP流
-      debugPrint('🎯 开始播放HTTP流: $httpUrl');
-      _videoController = VideoPlayerController.networkUrl(Uri.parse(httpUrl));
-
-      // 设置监听器
-      _videoController!.addListener(_onPlayerStateChanged);
-
-      // 初始化播放器
-      await _videoController!.initialize();
-
-      setState(() {
-        _isPlayerReady = true;
-      });
-
-      debugPrint('✅ 视频播放器初始化成功');
-      debugPrint('🎯 播放器状态: 准备就绪=$_isPlayerReady, 播放中=$_isPlaying');
-
-      // 开始播放
-      await _videoController!.play();
-
-      // 添加状态检查定时器
-      Future.delayed(const Duration(seconds: 5), () {
-        if (mounted && _isPlayerReady && !_isPlaying) {
-          debugPrint('⚠️ 播放器已就绪但未开始播放，尝试重新连接');
-          _scheduleReconnect();
-        } else if (mounted && _isPlaying) {
-          debugPrint('🎉 播放器正常播放中');
-        } else if (mounted && !_isPlayerReady) {
-          debugPrint('⚠️ 播放器未就绪，尝试自动重连');
-          _scheduleReconnect();
-        }
-      });
-    } catch (e) {
-      debugPrint('视频播放器启动失败: $e');
-
-      // 如果是连接超时或无效媒体错误，尝试重连
-      if (e.toString().contains('TimeoutException') ||
-          e.toString().contains('invalid or unsupported media') ||
-          e.toString().contains('Connection refused') ||
-          e.toString().contains('NetworkException')) {
-        debugPrint('检测到连接问题，尝试自动重连...');
-        _scheduleReconnect();
-      } else {
-        _showPlaybackError('播放失败: $e');
-      }
-    }
-  }
-
-  void _onPlayerStateChanged() {
-    if (!mounted || _videoController == null) return;
-
-    final wasPlaying = _isPlaying;
-    _isPlaying = _videoController!.value.isPlaying;
-
-    if (wasPlaying != _isPlaying) {
-      debugPrint('🎬 播放状态变更: $_isPlaying');
-      setState(() {});
-    }
-
-    // 检查是否有错误
-    if (_videoController!.value.hasError) {
-      debugPrint('播放器错误: ${_videoController!.value.errorDescription}');
-      _handleError('播放器错误: ${_videoController!.value.errorDescription}');
-    }
-
-    // 检查视频尺寸
-    if (_videoController!.value.isInitialized &&
-        (_videoController!.value.size.width > 0 ||
-            _videoController!.value.size.height > 0)) {
+    // 只使用HTTP流
+    if (streamProvider.httpPort == 0 || streamProvider.httpConverter == null) {
       debugPrint(
-        '📺 视频尺寸: ${_videoController!.value.size.width}x${_videoController!.value.size.height}',
+        '❌ HTTP转换器不可用: port=${streamProvider.httpPort}, converter=${streamProvider.httpConverter != null}',
       );
+      _showError('HTTP转换器不可用');
+      return;
+    }
+
+    final httpUrl = streamProvider.httpConverter!.httpUrl;
+    debugPrint('🌐 使用HTTP流: $httpUrl');
+
+    // 等待HTTP转换器连接
+    int waitCount = 0;
+    const maxWait = 20; // 增加等待时间
+
+    debugPrint('⏳ 开始等待HTTP转换器连接...');
+    while (!streamProvider.httpConverter!.isConnected && waitCount < maxWait) {
+      await Future.delayed(const Duration(seconds: 1));
+      waitCount++;
+      debugPrint(
+        '⏳ 等待HTTP转换器连接... (${waitCount}/${maxWait}) - 连接状态: ${streamProvider.httpConverter!.isConnected}',
+      );
+
+      // 检查流是否还在运行
+      if (!streamProvider.isStreaming) {
+        debugPrint('❌ 等待过程中视频流停止了');
+        _showError('视频流在等待过程中停止了');
+        return;
+      }
+    }
+
+    if (!streamProvider.httpConverter!.isConnected) {
+      debugPrint('❌ HTTP转换器无法连接到TCP流，等待超时');
+      _showError('HTTP转换器无法连接到TCP流');
+      return;
+    }
+
+    debugPrint('✅ HTTP转换器连接成功，开始设置播放器...');
+
+    // 设置播放器参数
+    try {
+      _player.loop = -1; // 无限循环
+      debugPrint('🎛️ 播放器参数设置完成');
+
+      // 尝试播放HTTP流
+      debugPrint('🎥 尝试播放HTTP流: $httpUrl');
+      bool success = await _tryPlayUrl(httpUrl);
+
+      if (success) {
+        setState(() {
+          _currentUrl = httpUrl;
+          _isInitialized = true;
+        });
+        debugPrint('✅ HTTP流播放成功，当前URL: $_currentUrl');
+      } else {
+        debugPrint('❌ 无法播放HTTP视频流');
+        _showError('无法播放HTTP视频流');
+      }
+    } catch (e) {
+      debugPrint('❌ 播放器设置失败: $e');
+      _showError('播放器设置失败: $e');
     }
   }
 
-  void _handleError(String message) {
-    if (!mounted) return;
+  Future<bool> _tryPlayUrl(String url) async {
+    try {
+      debugPrint('🎬 开始设置播放器媒体: $url');
+      _player.media = url;
+      debugPrint('✅ 媒体设置完成');
 
-    debugPrint('播放器错误: $message');
+      // 先准备媒体，然后再播放
+      debugPrint('🔄 准备媒体...');
+      final prepareResult = await _player.prepare();
+      debugPrint('📊 媒体准备结果: $prepareResult');
 
-    setState(() {
-      _hasError = true;
-      _errorMessage = message;
-    });
+      if (prepareResult < 0) {
+        debugPrint('❌ 媒体准备失败，错误码: $prepareResult');
+        return false;
+      }
+
+      debugPrint('▶️ 设置播放状态为播放');
+      _player.state = PlaybackState.playing;
+
+      debugPrint('🔄 更新纹理');
+      await _player.updateTexture();
+
+      // 等待更长时间检查是否播放成功
+      debugPrint('⏳ 等待播放器初始化...');
+      for (int i = 0; i < 20; i++) {
+        // 增加到20次检查，每次1秒
+        await Future.delayed(const Duration(seconds: 1));
+        final textureId = _player.textureId.value;
+        final mediaStatus = _player.mediaStatus;
+        final playerState = _player.state;
+
+        debugPrint('🔍 检查纹理ID (第${i + 1}次): $textureId');
+        debugPrint('📊 媒体状态: $mediaStatus');
+        debugPrint('🎮 播放器状态: $playerState');
+
+        // 检查媒体状态
+        if (mediaStatus.test(MediaStatus.loaded)) {
+          debugPrint('✅ 媒体已加载');
+        } else if (mediaStatus.test(MediaStatus.loading)) {
+          debugPrint('⏳ 媒体正在加载...');
+        } else if (mediaStatus.test(MediaStatus.stalled)) {
+          debugPrint('⚠️ 媒体加载停滞');
+        } else if (mediaStatus.test(MediaStatus.invalid)) {
+          debugPrint('❌ 媒体无效');
+          return false;
+        }
+
+        if (textureId != null) {
+          debugPrint('✅ 播放器纹理ID已生成: $textureId');
+          return true;
+        }
+      }
+
+      debugPrint('❌ 播放器未能生成纹理ID');
+      debugPrint('📊 最终媒体状态: ${_player.mediaStatus}');
+      debugPrint('🎮 最终播放器状态: ${_player.state}');
+      return false;
+    } catch (e) {
+      debugPrint('❌ 播放URL失败: $url');
+      debugPrint('❌ 错误详情: $e');
+      debugPrint('❌ 播放器状态: ${_player.state}');
+      debugPrint('❌ 纹理ID: ${_player.textureId.value}');
+      debugPrint('❌ 媒体状态: ${_player.mediaStatus}');
+      return false;
+    }
   }
 
-  void _showPlaybackError(String message) {
+  void _showError(String message) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: Colors.orange,
+        backgroundColor: Colors.red,
         duration: const Duration(seconds: 5),
         action: SnackBarAction(
           label: '重试',
@@ -177,79 +226,15 @@ class _VideoScreenState extends State<VideoScreen> {
     );
   }
 
-  Future<void> _play() async {
-    try {
-      await _videoController?.play();
-    } catch (e) {
-      _handleError('播放失败: $e');
-    }
-  }
-
-  Future<void> _pause() async {
-    try {
-      await _videoController?.pause();
-    } catch (e) {
-      _handleError('暂停失败: $e');
-    }
-  }
-
-  Future<void> _stop() async {
-    try {
-      await _videoController?.pause();
-    } catch (e) {
-      _handleError('停止失败: $e');
-    }
-  }
-
   Future<void> _reconnect() async {
-    if (!mounted) return;
-
-    debugPrint('🔄 开始手动重连...');
-    setState(() {
-      _hasError = false;
-      _errorMessage = '';
-    });
-
-    try {
-      await _stop();
-      await _videoController?.dispose();
-      _videoController = null;
-      _isPlayerReady = false;
-
-      // 等待一段时间再重连，给scrcpy服务器时间
-      await Future.delayed(Duration(seconds: 2));
-
-      await _startVideoPlayback();
-      debugPrint('✅ 手动重连成功');
-    } catch (e) {
-      debugPrint('❌ 手动重连失败: $e');
-      _handleError('重连失败: $e');
-    }
-  }
-
-  /// 调度自动重连
-  void _scheduleReconnect() {
-    if (!mounted) return;
-
-    debugPrint('🔄 调度自动重连...');
-
-    // 延迟3秒后自动重连
-    Future.delayed(Duration(seconds: 3), () {
-      if (mounted && (_hasError || !_isPlayerReady)) {
-        debugPrint('🔄 执行自动重连...');
-        _reconnect();
-      }
-    });
+    debugPrint('🔄 重新连接...');
+    _player.state = PlaybackState.stopped;
+    await _startVideoPlayback();
   }
 
   Future<void> _disconnect() async {
     // 停止播放器
-    try {
-      await _videoController?.pause();
-      await _videoController?.dispose();
-    } catch (e) {
-      debugPrint('停止播放器失败: $e');
-    }
+    _player.state = PlaybackState.stopped;
 
     if (!mounted) return;
 
@@ -269,96 +254,18 @@ class _VideoScreenState extends State<VideoScreen> {
     );
   }
 
-  Widget _buildErrorWidget() {
-    return Container(
-      color: Colors.black,
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, color: Colors.red, size: 64),
-            const SizedBox(height: 16),
-            const Text(
-              '播放错误',
-              style: TextStyle(color: Colors.white, fontSize: 18),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _errorMessage,
-              style: const TextStyle(color: Colors.white60),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(onPressed: _reconnect, child: const Text('重新连接')),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildControls() {
-    return Positioned(
-      bottom: 16,
-      left: 16,
-      right: 16,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Color.fromRGBO(0, 0, 0, 0.7),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            IconButton(
-              icon: Icon(
-                _isPlaying ? Icons.pause : Icons.play_arrow,
-                color: Colors.white,
-              ),
-              onPressed: _isPlaying ? _pause : _play,
-            ),
-            IconButton(
-              icon: const Icon(Icons.stop, color: Colors.white),
-              onPressed: _stop,
-            ),
-            IconButton(
-              icon: const Icon(Icons.replay, color: Colors.white),
-              onPressed: _reconnect,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
-    _videoController?.removeListener(_onPlayerStateChanged);
-    _videoController?.dispose();
+    _player.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_hasError) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          title: const Text('设备投屏'),
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          actions: [
-            IconButton(icon: const Icon(Icons.close), onPressed: _disconnect),
-          ],
-        ),
-        body: _buildErrorWidget(),
-      );
-    }
-
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('设备投屏'),
+        title: const Text('设备投屏 - HTTP'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         actions: [
@@ -383,7 +290,7 @@ class _VideoScreenState extends State<VideoScreen> {
         children: [
           // 视频播放器
           Center(
-            child: _isPlayerReady && _videoController != null
+            child: _isInitialized
                 ? Consumer<VideoStreamProvider>(
                     builder: (context, streamProvider, child) {
                       if (!streamProvider.isStreaming) {
@@ -400,9 +307,28 @@ class _VideoScreenState extends State<VideoScreen> {
                         );
                       }
 
-                      return AspectRatio(
-                        aspectRatio: _videoController!.value.aspectRatio,
-                        child: VideoPlayer(_videoController!),
+                      return ValueListenableBuilder<int?>(
+                        valueListenable: _player.textureId,
+                        builder: (context, textureId, _) {
+                          if (textureId == null) {
+                            return const Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                CircularProgressIndicator(color: Colors.white),
+                                SizedBox(height: 16),
+                                Text(
+                                  '初始化播放器...',
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                              ],
+                            );
+                          }
+
+                          return AspectRatio(
+                            aspectRatio: 16 / 9, // 默认比例
+                            child: Texture(textureId: textureId),
+                          );
+                        },
                       );
                     },
                   )
@@ -417,7 +343,6 @@ class _VideoScreenState extends State<VideoScreen> {
           ),
 
           // 播放控制
-          _buildControls(),
         ],
       ),
     );
@@ -440,12 +365,12 @@ class _VideoScreenState extends State<VideoScreen> {
             Text('HTTP端口: ${streamProvider.httpPort}'),
             Text('HTTP URL: ${streamProvider.httpConverter?.httpUrl ?? "未知"}'),
             Text('是否流式传输: ${streamProvider.isStreaming ? "是" : "否"}'),
-            Text('HTTP转换器状态: ${streamProvider.httpConverter?.isConnected == true ? "已连接" : "未连接"}'),
-            Text('播放器状态: ${_isPlaying ? "播放中" : "暂停/停止"}'),
-            if (_videoController != null)
-              Text(
-                '视频尺寸: ${_videoController!.value.size.width}x${_videoController!.value.size.height}',
-              ),
+            Text(
+              'HTTP转换器状态: ${streamProvider.httpConverter?.isConnected == true ? "已连接" : "未连接"}',
+            ),
+            Text('播放方式: HTTP转发'),
+            Text('当前URL: $_currentUrl'),
+            Text('播放器状态: ${_player.state.toString()}'),
           ],
         ),
         actions: [

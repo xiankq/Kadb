@@ -75,17 +75,17 @@ class VideoStreamProvider with ChangeNotifier {
       debugPrint('等待HTTP转换器连接TCP流...');
       int waitCount = 0;
       const maxWait = 15; // 最多等待15秒
-      
+
       while (!_httpConverter!.isConnected && waitCount < maxWait) {
         await Future.delayed(Duration(seconds: 1));
         waitCount++;
         debugPrint('等待HTTP转换器连接... (${waitCount}/${maxWait})');
       }
-      
+
       if (!_httpConverter!.isConnected) {
         throw Exception('HTTP转换器无法连接到TCP流');
       }
-      
+
       debugPrint('HTTP转换器连接成功');
 
       _streamStatus = '视频流已启动';
@@ -100,13 +100,13 @@ class VideoStreamProvider with ChangeNotifier {
       _streamStatus = '启动失败: $e';
       _isStarting = false;
       notifyListeners();
-      
+
       // 清理资源
       await _httpConverter?.stop();
       _httpConverter = null;
       await _forwarder?.stop();
       _forwarder = null;
-      
+
       return false;
     }
   }
@@ -218,12 +218,12 @@ class VideoStreamProvider with ChangeNotifier {
   Future<void> stopStream() async {
     try {
       debugPrint('停止视频流...');
-      
+
       // 先停止HTTP转换器
       await _httpConverter?.stop();
       _httpConverter = null;
       debugPrint('HTTP转换器已停止');
-      
+
       // 再停止TCP转发
       await _forwarder?.stop();
       _forwarder = null;
