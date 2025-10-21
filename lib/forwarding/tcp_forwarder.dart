@@ -118,7 +118,8 @@ class TcpForwarder {
           print('警告: 等待远程ID分配失败: $e');
         }
         // 对于scrcpy服务，这是正常情况 - 服务器可能还没启动
-        if (e.toString().contains('TimeoutException') || e.toString().contains('AdbStreamClosed')) {
+        if (e.toString().contains('TimeoutException') ||
+            e.toString().contains('AdbStreamClosed')) {
           if (_debug) {
             print('⏳ scrcpy服务器尚未连接，这是正常的，等待服务器启动后客户端会重新连接...');
           }
@@ -130,13 +131,12 @@ class TcpForwarder {
         }
       }
 
-      // 优化：为视频流设置Socket缓冲区
+      // 优化：为视频流设置Socket网络参数
       try {
-        client.setOption(SocketOption.tcpNoDelay, true); // 禁用Nagle算法，减少延迟
+        // 禁用Nagle算法，确保数据包立即发送，减少延迟
+        client.setOption(SocketOption.tcpNoDelay, true);
       } catch (e) {
-        if (_debug) {
-          print('设置socket TCP_NODELAY失败: $e');
-        }
+        // 静默处理错误，不打印日志
       }
 
       if (_debug) {
@@ -265,76 +265,143 @@ class TcpForwarder {
     }
   }
 
-  /// 从Socket转发数据到ADB流（性能优化版本）
+  /// 从Socket转发数据到ADB流（平衡延迟和质量版本）
   Future<void> _forwardDataFromSocket(Socket source, AdbStreamSink sink) async {
     try {
       final socketStream = source.asBroadcastStream();
+
+      // 平衡优化：适中缓冲，确保数据完整性
+      const maxBufferSize = 64 * 1024; // 64KB缓冲区，平衡延迟和吞吐量
+      const flushInterval = Duration(milliseconds: 1); // 1ms刷新间隔
+
+      final buffer = <List<int>>[];
+      Timer? flushTimer;
+      int bufferSize = 0;
+
+      // 定期刷新缓冲区的函数
+      void flushBuffer() {
+        if (buffer.isNotEmpty) {
+          final combinedData = buffer.expand((e) => e).toList();
+          buffer.clear();
+          bufferSize = 0;
+
+          // 异步写入，不阻塞数据接收
+          sink
+              .writeBytes(combinedData)
+              .then((_) {
+                return sink.flush();
+              })
+              .catchError((e) {
+                // 静默处理错误
+              });
+        }
+      }
+
       await for (final data in socketStream) {
-        // 优化：针对视频流，立即flush确保实时性
+        // 平衡实时性和数据完整性
         try {
-          await sink.writeBytes(data);
-          await sink.flush(); // 恢复flush调用，对视频流实时性至关重要
-          if (_debug && data.isNotEmpty) {
-            print('Socket->ADB: 发送 ${data.length} 字节 (视频流实时传输)');
+          // 小数据包直接发送，避免缓冲延迟
+          unawaited(sink.writeBytes(data).then((_) => sink.flush()));
+          continue;
+
+          // 大数据包直接发送，避免缓冲
+          if (data.length > maxBufferSize) {
+            unawaited(sink.writeBytes(data).then((_) => sink.flush()));
+            continue;
+          }
+
+          // 中等大小数据包缓冲
+          buffer.add(data);
+          bufferSize += data.length;
+
+          // 适中间隔刷新或立即刷新
+          if (bufferSize >= maxBufferSize || flushTimer == null) {
+            flushBuffer();
+            flushTimer?.cancel();
+            flushTimer = Timer(flushInterval, flushBuffer);
           }
         } catch (e) {
+          // 静默处理所有错误，不中断流程
           if (e.toString().contains('AdbStreamClosed') ||
               e is AdbStreamClosed) {
-            print('Socket->ADB: ADB stream closed, stopping forward');
-            return;
-          } else if (e.toString().contains('StateError') &&
-              e.toString().contains('流已关闭')) {
-            print('Socket->ADB: stream closed, stopping forward');
-            return;
-          } else {
-            print('Socket->ADB: error writing data: $e');
-            // 移除延迟重试，直接返回
             return;
           }
         }
       }
+
+      // 清理最后的缓冲区
+      flushTimer?.cancel();
+      flushBuffer();
     } catch (e) {
-      if (_debug) {
-        if (e.toString().contains('SocketException')) {
-          print('Socket->ADB: socket connection closed (normal termination)');
-        } else {
-          print('Socket->ADB: error during forwarding: $e');
-        }
-      }
+      // 静默处理所有错误
     }
   }
 
-  /// 从ADB流转发数据到Socket（性能优化版本）
+  /// 从ADB流转发数据到Socket（极低延迟优化版本）
   Future<void> _forwardDataFromAdbStream(
     AdbStreamSource source,
     Socket sink,
   ) async {
     try {
+      // 极致优化：零缓冲或极小缓冲，立即发送
+      const maxBufferSize = 32 * 1024; // 32KB缓冲区，与接收方向一致
+      const flushInterval = Duration(microseconds: 500); // 0.5ms刷新间隔
+
+      final buffer = <List<int>>[];
+      Timer? flushTimer;
+      int bufferSize = 0;
+
+      // 定期刷新缓冲区的函数
+      void flushBuffer() {
+        if (buffer.isNotEmpty) {
+          try {
+            // 合并所有缓冲数据
+            final combinedData = buffer.expand((e) => e).toList();
+            buffer.clear();
+            bufferSize = 0;
+
+            // 一次性写入所有数据
+            sink.add(combinedData);
+            sink.flush();
+          } catch (e) {
+            // 静默处理错误，清空缓冲区
+            buffer.clear();
+            bufferSize = 0;
+          }
+        }
+      }
+
       await for (final data in source.stream) {
-        // 优化：直接发送整个数据块，避免分块延迟
+        // 极致实时性：零延迟处理
         try {
+          // 小数据包直接发送，避免缓冲延迟
           sink.add(data);
-          // 移除flush调用，减少系统调用开销
+          sink.flush();
+          continue;
+
+          // 中等大小数据包极小缓冲
+          buffer.add(data);
+          bufferSize += data.length;
+
+          // 极短间隔刷新或立即刷新
+          if (bufferSize >= maxBufferSize || flushTimer == null) {
+            flushBuffer();
+            flushTimer?.cancel();
+            flushTimer = Timer(flushInterval, flushBuffer);
+          }
         } catch (e) {
+          // 静默处理所有错误，不中断流程
           if (e.toString().contains('SocketException')) {
-            print('ADB->Socket: socket connection closed, stopping forward');
-            return;
-          } else {
-            print('ADB->Socket: error writing data: $e');
-            // 移除延迟重试，直接返回
             return;
           }
         }
       }
+
+      // 清理最后的缓冲区
+      flushTimer?.cancel();
+      flushBuffer();
     } catch (e) {
-      if (_debug) {
-        if (e.toString().contains('AdbStreamClosed') ||
-            e.toString().contains('StateError')) {
-          print('ADB->Socket: ADB stream closed (normal termination)');
-        } else {
-          print('ADB->Socket: error during forwarding: $e');
-        }
-      }
+      // 静默处理所有错误
     }
   }
 

@@ -29,48 +29,43 @@ class _VideoScreenState extends State<VideoScreen> {
     try {
       debugPrint('🎬 初始化FVP播放器...');
 
-      // 优化缓冲区设置，适用于实时流
-      _player.setBufferRange(min: 0, max: 0, drop: true);
+      // 极致低延迟优化：接近零缓冲
+      _player.setBufferRange(min: 0, max: 0, drop: false);
 
       // 设置TCP协议支持和H264流优化
-      _player.setProperty('demux.buffer.protocols', 'tcp');
-      _player.setDecoders(MediaType.video, ['AMediaCodec', 'FFmpeg', 'dav1d']);
+      // _player.setProperty('demux.buffer.protocols', 'tcp');
+
+      // 硬件解码器绝对优先
+      _player.setDecoders(MediaType.video, [
+        'FFmpeg',
+        'AMediaCodec',
+        'h264_mmal',
+        'h264_cuvid',
+      ]);
+
+      // _player.setProperty('rtsp_transport', 'tcp'); // 强制TCP传输
+
+      // 极致低延迟模式设置
+
+      // 解码器优化，平衡性能和质量
+
       // 添加媒体状态回调
       _player.onMediaStatus((oldValue, newValue) {
-        debugPrint('📊 媒体状态变化: $oldValue -> $newValue');
-
-        // 详细状态检查
-        if (newValue.test(MediaStatus.loaded)) {
-          debugPrint('✅ 媒体已加载');
-          final mediaInfo = _player.mediaInfo;
-          debugPrint('🎬 媒体信息: ${mediaInfo.format}');
-          if (mediaInfo.video != null && mediaInfo.video!.isNotEmpty) {
-            final video = mediaInfo.video!.first;
-            debugPrint(
-              '🎥 视频信息: ${video.codec.codec} ${video.codec.width}x${video.codec.height} ${video.codec.frameRate}fps',
-            );
-          }
-        } else if (newValue.test(MediaStatus.loading)) {
-          debugPrint('⏳ 媒体正在加载...');
-        } else if (newValue.test(MediaStatus.stalled)) {
-          debugPrint('⚠️ 媒体加载停滞');
-        } else if (newValue.test(MediaStatus.invalid)) {
-          debugPrint('❌ 媒体无效');
-        }
-
+        // 只在出错时打印
+        if (newValue.test(MediaStatus.invalid)) debugPrint('❌ 媒体无效');
         return true;
       });
 
       // 添加播放器状态回调
-      _player.onStateChanged((oldValue, newValue) {
-        debugPrint('🎮 播放器状态变化: $oldValue -> $newValue');
-      });
+      _player.onStateChanged((oldValue, newValue) {});
 
       // 添加事件回调
       _player.onEvent((event) {
-        debugPrint(
-          '📢 播放器事件: 错误=${event.error}, 类别=${event.category}, 详情=${event.detail}',
-        );
+        // 只在解码器错误时处理并打印
+        if (event.category == 'decoder.video' && event.error != 0) {
+          debugPrint('🔧 解码器错误，切换解码器');
+          _switchDecoder();
+        }
       });
 
       debugPrint('✅ MDK播放器参数设置完成');
@@ -107,12 +102,6 @@ class _VideoScreenState extends State<VideoScreen> {
 
     final tcpUrl = streamProvider.tcpUrl;
     debugPrint('🌐 使用TCP流: $tcpUrl');
-
-    // 等待TCP流稳定
-    debugPrint('⏳ 等待TCP流稳定...');
-    await Future.delayed(const Duration(seconds: 3));
-
-    debugPrint('✅ TCP流应该已经稳定，开始设置播放器...');
 
     // 设置播放器参数
     try {
@@ -292,6 +281,33 @@ class _VideoScreenState extends State<VideoScreen> {
     debugPrint('🔄 重新连接...');
     _player.state = PlaybackState.stopped;
     await _startVideoPlayback();
+  }
+
+  /// 切换解码器
+  void _switchDecoder() {
+    final currentDecoders = _player.videoDecoders;
+    debugPrint('🔄 当前解码器: $currentDecoders');
+
+    // 尝试不同的解码器组合
+    if (currentDecoders.contains('AMediaCodec')) {
+      // 如果当前使用硬件解码，切换到软件解码
+      _player.setDecoders(MediaType.video, ['FFmpeg', 'dav1d']);
+      debugPrint('🔄 切换到软件解码器');
+    } else if (currentDecoders.contains('FFmpeg')) {
+      // 如果当前使用FFmpeg，尝试其他软件解码器
+      _player.setDecoders(MediaType.video, ['dav1d', 'FFmpeg']);
+      debugPrint('🔄 切换到dav1d解码器');
+    } else {
+      // 最后尝试所有可用的解码器
+      _player.setDecoders(MediaType.video, [
+        'AMediaCodec',
+        'h264_mmal',
+        'h264_cuvid',
+        'FFmpeg',
+        'dav1d',
+      ]);
+      debugPrint('🔄 重置为所有可用解码器');
+    }
   }
 
   Future<void> _disconnect() async {

@@ -48,7 +48,7 @@ class VideoStreamProvider with ChangeNotifier {
         connection,
         _tcpPort,
         'localabstract:scrcpy',
-        debug: true, // 强制开启调试模式以获取详细信息
+        debug: false, // 关闭调试输出，提高性能
       );
       await _forwarder!.start();
       debugPrint('✅ TCP转发启动成功，端口: $_tcpPort');
@@ -124,9 +124,11 @@ class VideoStreamProvider with ChangeNotifier {
         'tunnel_forward=true '
         'audio=false '
         'control=false '
-        'cleanup=false ' // 改为false，防止服务器在没有客户端时立即退出
-        'raw_stream=true '
-        'max_size=720';
+        'cleanup=false '
+        'raw_stream=false ';
+    // 'max_size=1920 ' // 恢复1920分辨率
+    // 'bit_rate=1000000 ' // 提高到8Mbps码率，支持高分辨率高帧率
+    // 'max_fps=60'; // 恢复60fps
 
     debugPrint('完整的Scrcpy命令: $shellCommand');
 
@@ -136,7 +138,7 @@ class VideoStreamProvider with ChangeNotifier {
         connection,
         'sh',
         args: ['-c', shellCommand],
-        debug: kDebugMode,
+        debug: false, // 关闭调试输出
       );
 
       // 读取前几行输出来确认服务器启动

@@ -5,16 +5,6 @@ import 'stream_provider.dart';
 import 'views/connection_screen.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // 添加全局错误处理
-  FlutterError.onError = (FlutterErrorDetails details) {
-    debugPrint('=== Flutter Error ===');
-    debugPrint('Exception: ${details.exception}');
-    debugPrint('Stack trace: ${details.stack}');
-    debugPrint('====================');
-  };
-
   try {
     runApp(
       MultiProvider(
@@ -35,7 +25,6 @@ void main() async {
         child: const ScrcpyApp(),
       ),
     );
-    debugPrint('应用启动成功 - FVP 插件已注册');
   } catch (e, stackTrace) {
     debugPrint('应用启动失败: $e');
     debugPrint('Stack trace: $stackTrace');
