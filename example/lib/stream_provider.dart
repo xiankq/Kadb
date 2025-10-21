@@ -3,19 +3,24 @@ import 'package:kadb_dart/kadb_dart.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
+import 'tcp_to_http_converter.dart';
 
 class VideoStreamProvider with ChangeNotifier {
   TcpForwarder? _forwarder;
+  TcpToHttpConverter? _httpConverter;
   bool _isStreaming = false;
   bool _isStarting = false;
   String _streamStatus = '准备就绪';
   int _tcpPort = 0;
+  int _httpPort = 0;
 
   bool get isStreaming => _isStreaming;
   bool get isStarting => _isStarting;
   String get streamStatus => _streamStatus;
   int get tcpPort => _tcpPort;
+  int get httpPort => _httpPort;
   TcpForwarder? get forwarder => _forwarder;
+  TcpToHttpConverter? get httpConverter => _httpConverter;
 
   VideoStreamProvider() {
     debugPrint('VideoStreamProvider 初始化');
@@ -37,7 +42,18 @@ class VideoStreamProvider with ChangeNotifier {
 
       // 随机选择端口
       _tcpPort = 11238 + DateTime.now().millisecond % 100;
-      debugPrint('使用TCP端口: $_tcpPort');
+      _httpPort = _tcpPort + 1000; // HTTP端口比TCP端口大1000
+      debugPrint('使用TCP端口: $_tcpPort, HTTP端口: $_httpPort');
+
+      debugPrint('启动TCP到HTTP转换器...');
+      // 先启动TCP到HTTP转换器
+      _httpConverter = TcpToHttpConverter(
+        tcpPort: _tcpPort,
+        httpPort: _httpPort,
+        debug: kDebugMode,
+      );
+      await _httpConverter!.start();
+      debugPrint('TCP到HTTP转换器启动成功');
 
       debugPrint('启动TCP转发...');
       // 启动TCP转发
@@ -55,6 +71,23 @@ class VideoStreamProvider with ChangeNotifier {
       await _startScrcpyServer(connection);
       debugPrint('scrcpy服务器启动成功');
 
+      // 等待TCP到HTTP转换器连接成功
+      debugPrint('等待HTTP转换器连接TCP流...');
+      int waitCount = 0;
+      const maxWait = 15; // 最多等待15秒
+      
+      while (!_httpConverter!.isConnected && waitCount < maxWait) {
+        await Future.delayed(Duration(seconds: 1));
+        waitCount++;
+        debugPrint('等待HTTP转换器连接... (${waitCount}/${maxWait})');
+      }
+      
+      if (!_httpConverter!.isConnected) {
+        throw Exception('HTTP转换器无法连接到TCP流');
+      }
+      
+      debugPrint('HTTP转换器连接成功');
+
       _streamStatus = '视频流已启动';
       _isStreaming = true;
       _isStarting = false;
@@ -67,6 +100,13 @@ class VideoStreamProvider with ChangeNotifier {
       _streamStatus = '启动失败: $e';
       _isStarting = false;
       notifyListeners();
+      
+      // 清理资源
+      await _httpConverter?.stop();
+      _httpConverter = null;
+      await _forwarder?.stop();
+      _forwarder = null;
+      
       return false;
     }
   }
@@ -177,14 +217,26 @@ class VideoStreamProvider with ChangeNotifier {
 
   Future<void> stopStream() async {
     try {
+      debugPrint('停止视频流...');
+      
+      // 先停止HTTP转换器
+      await _httpConverter?.stop();
+      _httpConverter = null;
+      debugPrint('HTTP转换器已停止');
+      
+      // 再停止TCP转发
       await _forwarder?.stop();
+      _forwarder = null;
+      debugPrint('TCP转发已停止');
     } catch (e) {
       debugPrint('停止流时出错: $e');
     } finally {
       _forwarder = null;
+      _httpConverter = null;
       _isStreaming = false;
       _streamStatus = '已停止';
       _tcpPort = 0;
+      _httpPort = 0;
       notifyListeners();
     }
   }

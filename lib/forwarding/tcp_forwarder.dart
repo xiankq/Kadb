@@ -218,7 +218,10 @@ class TcpForwarder {
   }
 
   /// 安全清理客户端连接资源
-  Future<void> _cleanupClientConnection(Socket client, AdbStream adbStream) async {
+  Future<void> _cleanupClientConnection(
+    Socket client,
+    AdbStream adbStream,
+  ) async {
     // 关闭客户端连接
     try {
       await client.close();
@@ -258,15 +261,15 @@ class TcpForwarder {
           await sink.writeBytes(data);
           await sink.flush(); // 恢复flush调用，对视频流实时性至关重要
           if (_debug && data.isNotEmpty) {
-            print(
-              'Socket->ADB: 发送 ${data.length} 字节 (视频流实时传输)',
-            );
+            print('Socket->ADB: 发送 ${data.length} 字节 (视频流实时传输)');
           }
         } catch (e) {
-          if (e.toString().contains('AdbStreamClosed') || e is AdbStreamClosed) {
+          if (e.toString().contains('AdbStreamClosed') ||
+              e is AdbStreamClosed) {
             print('Socket->ADB: ADB stream closed, stopping forward');
             return;
-          } else if (e.toString().contains('StateError') && e.toString().contains('流已关闭')) {
+          } else if (e.toString().contains('StateError') &&
+              e.toString().contains('流已关闭')) {
             print('Socket->ADB: stream closed, stopping forward');
             return;
           } else {
@@ -298,11 +301,6 @@ class TcpForwarder {
         try {
           sink.add(data);
           // 移除flush调用，减少系统调用开销
-          if (_debug && data.isNotEmpty) {
-            print(
-              'ADB->Socket: received ${data.length} bytes',
-            );
-          }
         } catch (e) {
           if (e.toString().contains('SocketException')) {
             print('ADB->Socket: socket connection closed, stopping forward');
@@ -316,7 +314,8 @@ class TcpForwarder {
       }
     } catch (e) {
       if (_debug) {
-        if (e.toString().contains('AdbStreamClosed') || e.toString().contains('StateError')) {
+        if (e.toString().contains('AdbStreamClosed') ||
+            e.toString().contains('StateError')) {
           print('ADB->Socket: ADB stream closed (normal termination)');
         } else {
           print('ADB->Socket: error during forwarding: $e');
@@ -472,7 +471,9 @@ class ReverseTcpForwarder {
       _server!.listen(_handleReverseConnection);
 
       if (_debug) {
-        print('Reverse TCP forward started: device port $_devicePort -> local port $_hostPort');
+        print(
+          'Reverse TCP forward started: device port $_devicePort -> local port $_hostPort',
+        );
       }
     } catch (e) {
       _moveToState(TcpForwarderState.stopped);

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
-import 'dart:io';
 import '../connection_provider.dart';
 import '../stream_provider.dart';
 import 'connection_screen.dart';
@@ -32,7 +31,6 @@ class _VideoScreenState extends State<VideoScreen> {
 
       // 延迟启动播放，确保TCP端口准备就绪
       await _startVideoPlayback();
-
     } catch (e) {
       _handleError('播放器初始化失败: $e');
     }
@@ -42,30 +40,42 @@ class _VideoScreenState extends State<VideoScreen> {
     if (!mounted) return;
 
     final streamProvider = context.read<VideoStreamProvider>();
-    if (!streamProvider.isStreaming || streamProvider.tcpPort == 0) {
+    if (!streamProvider.isStreaming || streamProvider.httpPort == 0) {
       debugPrint('视频流未准备好');
       return;
     }
 
-    final tcpPort = streamProvider.tcpPort;
-    final tcpUrl = 'tcp://127.0.0.1:$tcpPort';
+    final httpPort = streamProvider.httpPort;
+    final httpUrl = streamProvider.httpConverter?.httpUrl ?? 'http://127.0.0.1:$httpPort';
 
-    debugPrint('准备连接TCP端口: $tcpPort');
-    debugPrint('TCP URL: $tcpUrl');
+    debugPrint('准备连接HTTP端口: $httpPort');
+    debugPrint('HTTP URL: $httpUrl');
 
     try {
-      // 首先验证TCP端口是否可连接
-      await _validateTcpConnection(tcpPort);
-      debugPrint('TCP端口验证成功，等待更长时间让scrcpy服务器完全启动...');
+      // 等待HTTP转换器连接成功
+      debugPrint('等待HTTP转换器连接TCP流...');
+      int waitCount = 0;
+      const maxWait = 10; // 最多等待10秒
+      
+      while (!streamProvider.httpConverter!.isConnected && waitCount < maxWait) {
+        await Future.delayed(Duration(seconds: 1));
+        waitCount++;
+        debugPrint('等待HTTP转换器连接... (${waitCount}/${maxWait})');
+      }
+      
+      if (!streamProvider.httpConverter!.isConnected) {
+        throw Exception('HTTP转换器无法连接到TCP流');
+      }
+      
+      debugPrint('HTTP转换器连接成功，等待更长时间让视频流稳定...');
 
-      // 延迟更长时间给scrcpy服务器更多时间完全启动并开始传输数据
-      // scrcpy服务器需要时间初始化视频编码器和开始数据流
-      await Future.delayed(Duration(seconds: 5));
+      // 延迟更长时间给视频流更多时间稳定
+      await Future.delayed(Duration(seconds: 3));
       debugPrint('等待完成，开始播放');
 
-      // 创建视频控制器并连接到TCP流
-      debugPrint('🎯 开始播放TCP流: $tcpUrl');
-      _videoController = VideoPlayerController.networkUrl(Uri.parse(tcpUrl));
+      // 创建视频控制器并连接到HTTP流
+      debugPrint('🎯 开始播放HTTP流: $httpUrl');
+      _videoController = VideoPlayerController.networkUrl(Uri.parse(httpUrl));
 
       // 设置监听器
       _videoController!.addListener(_onPlayerStateChanged);
@@ -84,7 +94,7 @@ class _VideoScreenState extends State<VideoScreen> {
       await _videoController!.play();
 
       // 添加状态检查定时器
-      Future.delayed(const Duration(seconds: 3), () {
+      Future.delayed(const Duration(seconds: 5), () {
         if (mounted && _isPlayerReady && !_isPlaying) {
           debugPrint('⚠️ 播放器已就绪但未开始播放，尝试重新连接');
           _scheduleReconnect();
@@ -95,13 +105,14 @@ class _VideoScreenState extends State<VideoScreen> {
           _scheduleReconnect();
         }
       });
-
     } catch (e) {
       debugPrint('视频播放器启动失败: $e');
-      
+
       // 如果是连接超时或无效媒体错误，尝试重连
       if (e.toString().contains('TimeoutException') ||
-          e.toString().contains('invalid or unsupported media')) {
+          e.toString().contains('invalid or unsupported media') ||
+          e.toString().contains('Connection refused') ||
+          e.toString().contains('NetworkException')) {
         debugPrint('检测到连接问题，尝试自动重连...');
         _scheduleReconnect();
       } else {
@@ -129,40 +140,12 @@ class _VideoScreenState extends State<VideoScreen> {
 
     // 检查视频尺寸
     if (_videoController!.value.isInitialized &&
-        (_videoController!.value.size.width > 0 || _videoController!.value.size.height > 0)) {
-      debugPrint('📺 视频尺寸: ${_videoController!.value.size.width}x${_videoController!.value.size.height}');
+        (_videoController!.value.size.width > 0 ||
+            _videoController!.value.size.height > 0)) {
+      debugPrint(
+        '📺 视频尺寸: ${_videoController!.value.size.width}x${_videoController!.value.size.height}',
+      );
     }
-  }
-
-  Future<void> _validateTcpConnection(int tcpPort) async {
-    debugPrint('验证TCP端口连接: $tcpPort');
-
-    // 尝试多次连接，因为scrcpy服务器可能正在启动中
-    int attempts = 0;
-    const maxAttempts = 5;
-    
-    while (attempts < maxAttempts) {
-      attempts++;
-      try {
-        final socket = await Socket.connect(
-          '127.0.0.1',
-          tcpPort,
-          timeout: Duration(seconds: 2),
-        );
-
-        debugPrint('TCP端口 $tcpPort 连接成功 (尝试 $attempts/$maxAttempts)');
-        await socket.close();
-        return;
-      } catch (e) {
-        debugPrint('TCP端口 $tcpPort 连接失败 (尝试 $attempts/$maxAttempts): $e');
-        if (attempts < maxAttempts) {
-          debugPrint('等待2秒后重试...');
-          await Future.delayed(Duration(seconds: 2));
-        }
-      }
-    }
-    
-    throw Exception('TCP端口 $tcpPort 在 $maxAttempts 次尝试后仍不可连接');
   }
 
   void _handleError(String message) {
@@ -235,7 +218,7 @@ class _VideoScreenState extends State<VideoScreen> {
 
       // 等待一段时间再重连，给scrcpy服务器时间
       await Future.delayed(Duration(seconds: 2));
-      
+
       await _startVideoPlayback();
       debugPrint('✅ 手动重连成功');
     } catch (e) {
@@ -247,9 +230,9 @@ class _VideoScreenState extends State<VideoScreen> {
   /// 调度自动重连
   void _scheduleReconnect() {
     if (!mounted) return;
-    
+
     debugPrint('🔄 调度自动重连...');
-    
+
     // 延迟3秒后自动重连
     Future.delayed(Duration(seconds: 3), () {
       if (mounted && (_hasError || !_isPlayerReady)) {
@@ -306,10 +289,7 @@ class _VideoScreenState extends State<VideoScreen> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _reconnect,
-              child: const Text('重新连接'),
-            ),
+            ElevatedButton(onPressed: _reconnect, child: const Text('重新连接')),
           ],
         ),
       ),
@@ -412,7 +392,10 @@ class _VideoScreenState extends State<VideoScreen> {
                           children: [
                             CircularProgressIndicator(color: Colors.white),
                             SizedBox(height: 16),
-                            Text('等待视频流...', style: TextStyle(color: Colors.white)),
+                            Text(
+                              '等待视频流...',
+                              style: TextStyle(color: Colors.white),
+                            ),
                           ],
                         );
                       }
@@ -454,10 +437,15 @@ class _VideoScreenState extends State<VideoScreen> {
           children: [
             Text('状态: ${streamProvider.streamStatus}'),
             Text('TCP端口: ${streamProvider.tcpPort}'),
+            Text('HTTP端口: ${streamProvider.httpPort}'),
+            Text('HTTP URL: ${streamProvider.httpConverter?.httpUrl ?? "未知"}'),
             Text('是否流式传输: ${streamProvider.isStreaming ? "是" : "否"}'),
+            Text('HTTP转换器状态: ${streamProvider.httpConverter?.isConnected == true ? "已连接" : "未连接"}'),
             Text('播放器状态: ${_isPlaying ? "播放中" : "暂停/停止"}'),
             if (_videoController != null)
-              Text('视频尺寸: ${_videoController!.value.size.width}x${_videoController!.value.size.height}'),
+              Text(
+                '视频尺寸: ${_videoController!.value.size.width}x${_videoController!.value.size.height}',
+              ),
           ],
         ),
         actions: [
