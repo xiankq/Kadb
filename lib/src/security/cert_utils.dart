@@ -5,7 +5,7 @@ import 'package:pointycastle/export.dart';
 import 'package:asn1lib/asn1lib.dart' as asn1;
 import 'adb_key_pair.dart';
 import 'android_pubkey.dart';
-import '../crypto/crypto_utils.dart';
+import 'crypto_utils.dart';
 
 /// 证书工具类，统一的证书管理
 class CertUtils {

@@ -1,31 +1,31 @@
 /// Kadb Dart - 纯Dart实现的ADB客户端库
 library;
 
-export 'core/adb_protocol.dart';
-export 'core/adb_message.dart';
-export 'core/adb_reader.dart';
-export 'core/adb_writer.dart';
-export 'core/adb_connection.dart';
-export 'cert/adb_key_pair.dart';
-export 'cert/cert_utils.dart';
-export 'transport/transport_channel.dart';
-export 'stream/adb_stream.dart';
-export 'stream/adb_shell_stream.dart';
-export 'shell/adb_shell_response.dart';
-export 'stream/adb_sync_stream.dart';
-export 'forwarding/forwarding_manager.dart';
-export 'pair/pairing_connection_ctx.dart';
+export 'src/core/adb_protocol.dart';
+export 'src/core/adb_message.dart';
+export 'src/core/adb_reader.dart';
+export 'src/core/adb_writer.dart';
+export 'src/core/adb_connection.dart';
+export 'src/security/adb_key_pair.dart';
+export 'src/security/cert_utils.dart';
+export 'src/transport/transport_channel.dart';
+export 'src/stream/adb_stream.dart';
+export 'src/stream/adb_shell_stream.dart';
+export 'src/shell/adb_shell_response.dart';
+export 'src/stream/adb_sync_stream.dart';
+export 'src/forwarding/tcp_forwarding.dart';
+export 'src/security/pairing_connection_ctx.dart';
 
 import 'dart:async';
 import 'dart:io';
-import 'core/adb_connection.dart';
-import 'cert/adb_key_pair.dart';
-import 'cert/cert_utils.dart';
-import 'stream/adb_shell_stream.dart';
-import 'shell/adb_shell_response.dart';
-import 'stream/adb_sync_stream.dart';
-import 'stream/adb_stream.dart';
-import 'forwarding/forwarding_manager.dart';
+import 'src/core/adb_connection.dart';
+import 'src/security/adb_key_pair.dart';
+import 'src/security/cert_utils.dart';
+import 'src/stream/adb_shell_stream.dart';
+import 'src/shell/adb_shell_response.dart';
+import 'src/stream/adb_sync_stream.dart';
+import 'src/stream/adb_stream.dart';
+import 'src/forwarding/tcp_forwarding.dart';
 
 /// ADB客户端主类
 class KadbDart {

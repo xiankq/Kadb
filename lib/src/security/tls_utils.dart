@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import '../cert/adb_key_pair.dart';
-import '../cert/android_pubkey.dart';
-import '../cert/cert_utils.dart';
+import 'adb_key_pair.dart';
+import 'android_pubkey.dart';
+import 'cert_utils.dart';
 
 /// TLS工具类
 class TlsUtils {

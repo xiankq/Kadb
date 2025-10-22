@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:pointycastle/export.dart';
-import '../cert/adb_key_pair.dart';
-import '../crypto/crypto_utils.dart';
+import 'adb_key_pair.dart';
+import 'crypto_utils.dart';
 
 /// SSL工具类
 /// 用于处理SSL/TLS相关的工具函数

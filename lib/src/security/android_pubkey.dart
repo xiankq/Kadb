@@ -2,7 +2,7 @@ library;
 
 import 'dart:typed_data';
 import 'package:pointycastle/asymmetric/api.dart';
-import '../crypto/crypto_utils.dart';
+import 'crypto_utils.dart';
 
 /// Android公钥格式编码和解码类，基于Kotlin原项目完整实现Android RSA公钥格式
 /// Android公钥工具类

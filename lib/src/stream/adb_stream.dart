@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import '../core/adb_protocol.dart';
 import '../core/adb_writer.dart';
 import '../queue/adb_message_queue.dart';
-import '../exception/adb_stream_closed.dart';
+import '../utils/adb_stream_closed.dart';
 
 /// ADB流数据源，提供流数据的基本操作
 class AdbStreamSource {

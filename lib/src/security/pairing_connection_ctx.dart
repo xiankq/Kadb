@@ -3,10 +3,10 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import '../cert/adb_key_pair.dart';
-import '../cert/cert_utils.dart';
-import 'pairing_auth_ctx.dart';
-import '../tls/tls_utils.dart';
+import 'adb_key_pair.dart';
+import 'cert_utils.dart';
+import 'pairing_auth.dart';
+import 'tls_utils.dart';
 
 /// 配对连接上下文
 /// 管理ADB设备配对连接的TLS通信和认证流程

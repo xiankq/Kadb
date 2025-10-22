@@ -1,5 +1,5 @@
 import 'package:kadb_dart/kadb_dart.dart';
-import 'package:kadb_dart/debug/logging.dart';
+import 'package:kadb_dart/src/utils/logging.dart';
 
 void main() async {
   // 设置调试级别：false=仅关键信息，true=标准调试，verbose=true=详细调试

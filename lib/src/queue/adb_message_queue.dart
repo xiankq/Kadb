@@ -4,7 +4,7 @@ import 'dart:collection';
 import '../core/adb_message.dart';
 import '../core/adb_protocol.dart';
 import '../core/adb_reader.dart';
-import '../exception/adb_stream_closed.dart';
+import '../utils/adb_stream_closed.dart';
 
 /// ADB消息队列，负责管理ADB协议的消息队列和流操作
 class AdbMessageQueue {

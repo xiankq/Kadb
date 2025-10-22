@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'adb_message.dart';
 import 'adb_protocol.dart';
-import '../debug/logging.dart';
+import '../utils/logging.dart';
 import '../utils/byte_utils.dart';
 
 /// ADB消息读取器，负责从数据源读取ADB协议消息

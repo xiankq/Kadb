@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
-import '../cert/adb_key_pair.dart';
-import '../cert/cert_utils.dart';
+import '../security/adb_key_pair.dart';
+import '../security/cert_utils.dart';
 import 'adb_message.dart';
 import 'adb_protocol.dart';
 import 'adb_reader.dart';
@@ -9,8 +9,8 @@ import 'adb_writer.dart';
 import '../queue/adb_message_queue.dart';
 import '../stream/adb_stream.dart';
 import '../transport/transport_channel.dart';
-import '../transport/socket_transport_channel.dart';
-import '../debug/logging.dart';
+import '../transport/socket_transport.dart';
+import '../utils/logging.dart';
 
 /// ADB连接类，负责ADB协议的连接管理和流操作
 class AdbConnection {
