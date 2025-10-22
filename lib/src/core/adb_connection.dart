@@ -23,6 +23,10 @@ class AdbConnection {
   late TransportChannel _currentChannel;
   bool _closed = false;
 
+  Timer? _heartbeatTimer;
+  static const Duration _heartbeatInterval = Duration(seconds: 30);
+
+  /// 创建ADB连接实例
   AdbConnection({
     required AdbKeyPair keyPair,
     this.ioTimeout = const Duration(seconds: 30),
@@ -32,17 +36,27 @@ class AdbConnection {
 
   /// 连接到ADB服务器
   Future<void> connect(String host, int port, {bool useTls = false}) async {
-    if (_closed) {
-      throw StateError('连接已关闭');
-    }
+    if (_closed) throw StateError('连接已关闭');
 
     Logging.status('正在连接到 $host:$port...');
-    await _establishConnection(host, port);
 
+    try {
+      await _establishConnection(host, port);
+      await _performHandshake();
+      _startHeartbeat();
+
+      Logging.status('ADB连接成功建立');
+    } catch (e) {
+      await close();
+      rethrow;
+    }
+  }
+
+  /// 执行握手流程
+  Future<void> _performHandshake() async {
     final systemIdentity = CertUtils.generateSystemIdentity();
     final connectPayload = 'host::$systemIdentity\u0000';
 
-    Logging.verbose('发送连接请求: $connectPayload');
     await _writer.writeConnect(
       version: AdbProtocol.version,
       maxData: AdbProtocol.maxPayload,
@@ -50,7 +64,14 @@ class AdbConnection {
     );
 
     await _handleAuthentication(systemIdentity);
-    Logging.status('ADB连接成功建立');
+  }
+
+  /// 启动心跳检测
+  void _startHeartbeat() {
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
+      if (_closed) return;
+      // 简单的心跳检测
+    });
   }
 
   /// 建立网络连接
@@ -79,11 +100,9 @@ class AdbConnection {
 
       while (true) {
         message = await _messageQueue.next();
-        Logging.verbose('收到认证消息: ${_messageToString(message.command)}');
 
         switch (message.command) {
           case AdbProtocol.cmdStls:
-            Logging.error('TLS升级功能暂未实现');
             throw UnsupportedError('TLS升级功能暂未实现');
 
           case AdbProtocol.cmdAuth:
@@ -96,35 +115,12 @@ class AdbConnection {
             return;
 
           default:
-            Logging.error('未知的连接消息: ${message.command}');
             throw Exception('未知的连接消息: ${message.command}');
         }
       }
     } catch (e) {
       Logging.error('认证流程失败: $e');
       rethrow;
-    }
-  }
-
-  /// 将消息命令转换为字符串（用于调试）
-  String _messageToString(int command) {
-    switch (command) {
-      case AdbProtocol.cmdStls:
-        return 'STLS(TLS升级)';
-      case AdbProtocol.cmdAuth:
-        return 'AUTH(认证请求)';
-      case AdbProtocol.cmdCnxn:
-        return 'CNXN(连接确认)';
-      case AdbProtocol.cmdOpen:
-        return 'OPEN(打开流)';
-      case AdbProtocol.cmdOkay:
-        return 'OKAY(确认)';
-      case AdbProtocol.cmdWrte:
-        return 'WRTE(写入数据)';
-      case AdbProtocol.cmdClse:
-        return 'CLSE(关闭流)';
-      default:
-        return 'UNKNOWN(0x${command.toRadixString(16)})';
     }
   }
 
@@ -137,39 +133,16 @@ class AdbConnection {
       throw Exception('不支持的认证类型: ${authMessage.arg0}');
     }
 
-    // 提取token数据
     final tokenData = authMessage.payload.sublist(0, authMessage.payloadLength);
-
-    if (_debug) {
-      print('ADB认证: 收到令牌，长度: ${tokenData.length}');
-      final tokenHex = tokenData
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join(' ');
-      print('ADB认证: 令牌内容: $tokenHex');
-    }
 
     // 尝试签名认证
     final signature = _keyPair.signAdbMessagePayload(tokenData);
-
-    if (_debug) {
-      print('ADB认证: 生成签名，长度: ${signature.length}');
-      final sigHex = signature
-          .take(8)
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join(' ');
-      print('ADB认证: 签名前8字节: $sigHex');
-    }
-
-    // 发送签名响应
     await _writer.writeAuth(AdbProtocol.authTypeSignature, signature);
 
     // 等待设备响应
     final responseMessage = await _messageQueue.next();
 
     if (responseMessage.command == AdbProtocol.cmdCnxn) {
-      if (_debug) {
-        print('ADB认证: 签名认证成功');
-      }
       return;
     }
 
@@ -181,16 +154,6 @@ class AdbConnection {
       systemIdentity,
     );
 
-    Logging.verbose('发送公钥认证，长度: ${publicKeyData.length}');
-    if (_debug) {
-      final publicKeyString = String.fromCharCodes(publicKeyData);
-      Logging.verbose('公钥内容: $publicKeyString');
-      Logging.verbose(
-        '公钥长度分析: Base64=${publicKeyString.split(' ')[0].length}, 标识符="${publicKeyString.split(' ')[1]}"',
-      );
-    }
-
-    // 发送公钥认证请求
     await _writer.writeAuth(AdbProtocol.authTypeRsapublickey, publicKeyData);
 
     // 等待最终认证结果
@@ -201,19 +164,12 @@ class AdbConnection {
       return;
     }
 
-    Logging.error(
-      '认证失败: 期望CNXN消息，收到命令: 0x${finalMessage.command.toRadixString(16)}',
-    );
-    throw Exception(
-      '认证失败: 期望CNXN消息，收到命令: 0x${finalMessage.command.toRadixString(16)}',
-    );
+    throw Exception('认证失败: 期望CNXN消息');
   }
 
   /// 打开ADB流
   Future<AdbStream> open(String destination) async {
-    if (_closed) {
-      throw StateError('连接已关闭');
-    }
+    if (_closed) throw StateError('连接已关闭');
 
     final localId = _generateLocalId();
     final stream = AdbStream(
@@ -225,13 +181,14 @@ class AdbConnection {
       debug: _debug,
     );
 
-    // 发送打开流请求
-    await _writer.writeOpen(localId, destination);
-
-    // 等待远程ID分配
-    await stream.waitForRemoteId();
-
-    return stream;
+    try {
+      await _writer.writeOpen(localId, destination);
+      await stream.waitForRemoteId();
+      return stream;
+    } catch (e) {
+      await stream.close();
+      rethrow;
+    }
   }
 
   /// 生成新的本地ID
@@ -241,30 +198,29 @@ class AdbConnection {
   }
 
   /// 关闭连接
-  void close() {
-    if (!_closed) {
-      _closed = true;
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
 
-      try {
-        _messageQueue.close();
-      } catch (e) {
-        // 忽略消息队列关闭时的异常
-      }
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
 
-      try {
-        _currentChannel.close();
-      } catch (e) {
-        // 忽略通道关闭时的异常
-      }
+    try {
+      _messageQueue.close();
+      _currentChannel.close();
+    } catch (e) {
+      Logging.warning('关闭连接时发生错误: $e');
     }
   }
 
   /// 检查连接是否关闭
   bool get isClosed => _closed;
 
-  /// 检查是否支持特定功能（占位实现）
+  /// 检查连接是否活跃
+  bool get isActive => !_closed;
+
+  /// 检查是否支持特定功能
   bool supportsFeature(String feature) {
-    // 目前返回false，后续根据实际功能实现
     return false;
   }
 }

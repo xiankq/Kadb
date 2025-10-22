@@ -10,14 +10,19 @@ import '../utils/adb_stream_closed.dart';
 class AdbMessageQueue {
   static const int _defaultTimeoutSeconds = 10;
   static const int _nextTimeoutSeconds = 45;
+  static const int _maxQueueSize = 1000;
 
   final AdbReader _adbReader;
   final Map<int, Map<int, Queue<AdbMessage>>> _queues = {};
   final Set<int> _openStreams = {};
   final StreamController<AdbMessage> _messageController =
       StreamController<AdbMessage>.broadcast();
+
   bool _isReading = false;
   bool _isClosed = false;
+
+  int _consecutiveErrors = 0;
+  static const int _maxConsecutiveErrors = 5;
 
   AdbMessageQueue(this._adbReader);
 
@@ -37,12 +42,9 @@ class AdbMessageQueue {
   /// 获取指定本地ID和命令的消息
   Future<AdbMessage> take(int localId, int command) async {
     if (_isClosed) throw StateError('消息队列已关闭');
+    if (!_openStreams.contains(localId)) throw AdbStreamClosed(localId);
 
-    if (!_openStreams.contains(localId)) {
-      throw AdbStreamClosed(localId);
-    }
-
-    // 对于WRTE命令，使用无超时版本
+    // WRTE命令使用无超时版本
     if (command == AdbProtocol.cmdWrte) {
       return _takeWithoutTimeout(localId, command);
     }
@@ -68,14 +70,6 @@ class AdbMessageQueue {
       if (!_isReading) _startReading();
 
       final subscription = _messageController.stream.listen((message) {
-        if (message.command == 0xFFFFFFFF && message.arg1 == localId) {
-          if (!messageReceived && !completer.isCompleted) {
-            messageReceived = true;
-            completer.completeError(AdbStreamClosed(localId));
-          }
-          return;
-        }
-
         if (_getLocalId(message) == localId &&
             _getCommand(message) == command) {
           if (!messageReceived && !completer.isCompleted) {
@@ -96,6 +90,7 @@ class AdbMessageQueue {
   /// 获取指定本地ID和命令的消息（无超时）
   Future<AdbMessage> _takeWithoutTimeout(int localId, int command) async {
     if (_isClosed) throw StateError('消息队列已关闭');
+    if (!_openStreams.contains(localId)) throw AdbStreamClosed(localId);
 
     final completer = Completer<AdbMessage>();
     var messageReceived = false;
@@ -107,14 +102,6 @@ class AdbMessageQueue {
       if (!_isReading) _startReading();
 
       final subscription = _messageController.stream.listen((message) {
-        if (message.command == 0xFFFFFFFF && message.arg1 == localId) {
-          if (!messageReceived && !completer.isCompleted) {
-            messageReceived = true;
-            completer.completeError(AdbStreamClosed(localId));
-          }
-          return;
-        }
-
         if (_getLocalId(message) == localId &&
             _getCommand(message) == command) {
           if (!messageReceived && !completer.isCompleted) {
@@ -159,58 +146,68 @@ class AdbMessageQueue {
     _readMessages();
   }
 
-  /// 读取消息
-  void _readMessages() async {
+  /// 读取消息循环
+  Future<void> _readMessages() async {
     while (!_isClosed && _isReading) {
       try {
         final message = await _adbReader.readMessage();
-        final localId = _getLocalId(message);
-        final command = _getCommand(message);
-
-        if (_isCloseCommand(message)) {
-          _openStreams.remove(localId);
-          if (_queues.containsKey(localId)) {
-            _queues.remove(localId);
-          }
-
-          _messageController.add(
-            AdbMessage(
-              command: 0xFFFFFFFF,
-              arg0: 0,
-              arg1: localId,
-              payloadLength: 0,
-              checksum: 0,
-              magic: 0,
-              payload: [],
-            ),
-          );
-          continue;
-        }
-
-        if (_queues.containsKey(localId)) {
-          final streamQueues = _queues[localId]!;
-          if (!streamQueues.containsKey(command)) {
-            streamQueues[command] = Queue<AdbMessage>();
-          }
-          streamQueues[command]!.add(message);
-        }
-
-        _messageController.add(message);
+        _consecutiveErrors = 0;
+        await _processMessage(message);
       } catch (e) {
-        if (!_isClosed) {
-          await Future.delayed(Duration(milliseconds: 50));
+        _consecutiveErrors++;
+
+        if (_consecutiveErrors >= _maxConsecutiveErrors) {
+          break;
         }
+
+        await Future.delayed(Duration(milliseconds: 100));
       }
     }
+
+    _isReading = false;
   }
 
-  /// 获取消息的本地ID
+  /// 处理消息
+  Future<void> _processMessage(AdbMessage message) async {
+    final localId = _getLocalId(message);
+    final command = _getCommand(message);
+
+    if (_isCloseCommand(message)) {
+      _openStreams.remove(localId);
+      _queues.remove(localId);
+
+      _messageController.add(
+        AdbMessage(
+          command: 0xFFFFFFFF,
+          arg0: 0,
+          arg1: localId,
+          payloadLength: 0,
+          checksum: 0,
+          magic: 0,
+          payload: [],
+        ),
+      );
+      return;
+    }
+
+    if (_queues.containsKey(localId)) {
+      final streamQueues = _queues[localId]!;
+      if (!streamQueues.containsKey(command)) {
+        streamQueues[command] = Queue<AdbMessage>();
+      }
+
+      if (streamQueues[command]!.length >= _maxQueueSize) {
+        streamQueues[command]!.removeFirst();
+      }
+
+      streamQueues[command]!.add(message);
+    }
+
+    _messageController.add(message);
+  }
+
   int _getLocalId(AdbMessage message) => message.arg1;
-
-  /// 获取消息的命令
   int _getCommand(AdbMessage message) => message.command;
-
-  /// 检查是否是关闭命令
   bool _isCloseCommand(AdbMessage message) =>
       message.command == AdbProtocol.cmdClse;
 
@@ -250,13 +247,10 @@ class AdbMessageQueue {
     }
 
     subscription = _messageController.stream.listen(
-      (message) {
-        if (!isCompleted) completeWithMessage(message);
-      },
+      (message) => !isCompleted ? completeWithMessage(message) : null,
       onError: completeWithError,
-      onDone: () {
-        if (!isCompleted) completeWithError(StateError('消息流已关闭'));
-      },
+      onDone: () =>
+          !isCompleted ? completeWithError(StateError('消息流已关闭')) : null,
       cancelOnError: false,
     );
 
@@ -292,11 +286,17 @@ class AdbMessageQueue {
     required Duration timeout,
   }) async {
     if (_isClosed) throw StateError('消息队列已关闭');
-
     if (!_openStreams.contains(localId)) throw AdbStreamClosed(localId);
 
     final completer = Completer<AdbMessage>();
     var messageReceived = false;
+
+    final message = _poll(localId, command);
+    if (message != null) {
+      return message;
+    }
+
+    if (!_isReading) _startReading();
 
     final timer = Timer(timeout, () {
       if (!messageReceived) {
@@ -306,32 +306,20 @@ class AdbMessageQueue {
       }
     });
 
-    try {
-      final message = _poll(localId, command);
-      if (message != null) {
-        messageReceived = true;
-        timer.cancel();
-        return message;
-      }
-
-      if (!_isReading) _startReading();
-
-      final subscription = _messageController.stream.listen((message) {
-        if (_getLocalId(message) == localId &&
-            _getCommand(message) == command) {
-          if (!messageReceived && !completer.isCompleted) {
-            messageReceived = true;
-            timer.cancel();
-            completer.complete(message);
-          }
+    final subscription = _messageController.stream.listen((message) {
+      if (_getLocalId(message) == localId && _getCommand(message) == command) {
+        if (!messageReceived && !completer.isCompleted) {
+          messageReceived = true;
+          completer.complete(message);
         }
-      });
+      }
+    });
 
-      final result = await completer.future;
-      await subscription.cancel();
-      return result;
+    try {
+      return await completer.future;
     } finally {
       timer.cancel();
+      await subscription.cancel();
     }
   }
 
@@ -347,9 +335,6 @@ class AdbMessageQueue {
     }
   }
 
-  /// 检查消息队列是否关闭
   bool get isClosed => _isClosed;
-
-  /// 检查消息队列是否正在读取
   bool get isReading => _isReading;
 }

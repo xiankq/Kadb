@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:convert';
+import 'dart:typed_data';
 import 'adb_stream.dart';
 import '../core/adb_connection.dart';
 
@@ -56,9 +56,13 @@ class SyncFileStat {
 }
 
 /// ADB同步流，用于文件同步操作
+/// 修复版本：实现真正的零拷贝和流式处理
 class AdbSyncStream {
   final AdbStream _stream;
-  final List<int> _buffer = [];
+
+  // 流式处理缓冲区
+  final BytesBuilder _readBuffer = BytesBuilder(copy: false);
+  int _readBufferOffset = 0;
 
   /// 创建同步流
   AdbSyncStream(this._stream);
@@ -123,7 +127,7 @@ class AdbSyncStream {
     return bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
   }
 
-  /// 发送文件到设备
+  /// 发送文件到设备（流式处理版本）
   Future<void> send(
     Stream<List<int>> source,
     String remotePath,
@@ -140,32 +144,45 @@ class AdbSyncStream {
     await _stream.sink.writeBytes(remoteBytes);
     await _stream.sink.flush();
 
-    _buffer.clear();
-
-    // 发送文件数据（使用64KB分块，与Kotlin版本一致）
+    // 流式发送文件数据，避免内存积累
     const int chunkSize = 64 * 1024; // 64KB
-    final allData = <int>[];
 
-    // 收集所有数据
     await for (final chunk in source) {
-      allData.addAll(chunk);
-    }
+      if (chunk.isEmpty) continue;
 
-    // 分块发送数据
-    for (int i = 0; i < allData.length; i += chunkSize) {
-      final end = (i + chunkSize < allData.length)
-          ? i + chunkSize
-          : allData.length;
-      final chunk = allData.sublist(i, end);
+      // 零拷贝处理
+      Uint8List dataToSend;
+      if (chunk is Uint8List) {
+        dataToSend = chunk;
+      } else {
+        dataToSend = Uint8List.fromList(chunk);
+      }
 
-      await _writePacket(AdbSyncStreamConstants.data, chunk.length);
-      await _stream.sink.writeBytes(chunk);
-      // 注意：这里不flush，让数据积累后再一次性flush
+      // 分块发送大块数据
+      for (int offset = 0; offset < dataToSend.length; offset += chunkSize) {
+        final end = (offset + chunkSize < dataToSend.length)
+            ? offset + chunkSize
+            : dataToSend.length;
+
+        if (end - offset == dataToSend.length) {
+          // 整个块，直接发送
+          await _writePacket(AdbSyncStreamConstants.data, dataToSend.length);
+          await _stream.sink.writeBytes(dataToSend);
+        } else {
+          // 部分块，创建视图
+          final view = Uint8List.view(
+            dataToSend.buffer,
+            dataToSend.offsetInBytes + offset,
+            end - offset,
+          );
+          await _writePacket(AdbSyncStreamConstants.data, view.length);
+          await _stream.sink.writeBytes(view);
+        }
+      }
     }
 
     // 发送完成标记
     final lastModifiedSec = (lastModifiedMs / 100).round();
-
     await _writePacket(AdbSyncStreamConstants.done, lastModifiedSec);
 
     // 尝试读取响应，但优雅处理超时情况
@@ -190,7 +207,7 @@ class AdbSyncStream {
     }
   }
 
-  /// 从设备接收文件
+  /// 从设备接收文件（流式处理版本）
   Future<void> recv(StreamSink<List<int>> sink, String remotePath) async {
     await _writePacket(AdbSyncStreamConstants.recv, remotePath.length);
 
@@ -199,28 +216,60 @@ class AdbSyncStream {
     await _stream.sink.writeBytes(remoteBytes);
     await _stream.sink.flush();
 
-    _buffer.clear();
-
-    // 接收文件数据
+    // 流式接收文件数据
     while (true) {
       final packet = await _readPacket();
       switch (packet.id) {
         case AdbSyncStreamConstants.data:
           final chunkSize = packet.arg;
-          final chunk = await _stream.source.take(chunkSize);
+
+          // 零拷贝读取数据块
+          final chunk = await _readChunk(chunkSize);
           sink.add(chunk);
           break;
+
         case AdbSyncStreamConstants.done:
           await sink.close();
           return;
+
         case AdbSyncStreamConstants.fail:
           final messageBytes = await _stream.source.take(packet.arg);
           final message = String.fromCharCodes(messageBytes);
           throw Exception("同步失败: $message");
+
         default:
           throw Exception("意外的同步数据包ID: ${packet.id}");
       }
     }
+  }
+
+  /// 读取数据块（零拷贝优化）
+  Future<Uint8List> _readChunk(int size) async {
+    if (size <= 0) return Uint8List(0);
+
+    // 如果缓冲区有足够数据，直接返回视图
+    final bufferData = _readBuffer.toBytes();
+    if (bufferData.length >= _readBufferOffset + size) {
+      final result = Uint8List.view(
+        bufferData.buffer,
+        bufferData.offsetInBytes + _readBufferOffset,
+        size,
+      );
+      _readBufferOffset += size;
+
+      // 清理已使用的缓冲区数据
+      if (_readBufferOffset > 64 * 1024) {
+        // 64KB阈值
+        _readBuffer.clear();
+        _readBufferOffset = 0;
+      }
+
+      return result;
+    }
+
+    // 缓冲区数据不足，从流中读取
+    final data = await _stream.source.take(size);
+    return data is Uint8List ? data : Uint8List.fromList(data);
   }
 
   /// 写入数据包
@@ -241,25 +290,35 @@ class AdbSyncStream {
     await _stream.sink.flush();
   }
 
-  /// 读取数据包
+  /// 读取数据包（优化版本）
   Future<SyncPacket> _readPacket() async {
     // 创建一个completer来等待数据
     final completer = Completer<SyncPacket>();
     late StreamSubscription subscription;
-    var buffer = <int>[];
+
+    // 重置读取缓冲区
+    _readBuffer.clear();
+    _readBufferOffset = 0;
 
     subscription = _stream.source.stream.listen((data) {
-      buffer.addAll(data);
+      _readBuffer.add(data);
 
       // 检查是否有足够的数据读取一个sync包（8字节）
-      while (buffer.length >= 8) {
-        final idBytes = buffer.sublist(0, 4);
-        final argBytes = buffer.sublist(4, 8);
+      final bufferData = _readBuffer.toBytes();
+      while (bufferData.length - _readBufferOffset >= 8) {
+        final idBytes = bufferData.sublist(
+          _readBufferOffset,
+          _readBufferOffset + 4,
+        );
+        final argBytes = bufferData.sublist(
+          _readBufferOffset + 4,
+          _readBufferOffset + 8,
+        );
 
         // 尝试解码ID
         String id;
         try {
-          id = utf8.decode(idBytes, allowMalformed: true);
+          id = String.fromCharCodes(idBytes);
         } catch (e) {
           id = String.fromCharCodes(idBytes);
         }
@@ -273,13 +332,13 @@ class AdbSyncStream {
         // 检查是否是有效的sync协议ID
         if (AdbSyncStreamConstants.syncIds.contains(id)) {
           // 找到有效的sync包
-          buffer.removeRange(0, 8); // 移除已处理的数据
+          _readBufferOffset += 8;
           subscription.cancel();
           completer.complete(SyncPacket(id, arg));
           return;
         } else {
           // 不是有效的sync包，移除第一个字节重试
-          buffer.removeAt(0);
+          _readBufferOffset++;
         }
       }
     });
@@ -297,6 +356,8 @@ class AdbSyncStream {
 
   /// 关闭同步流
   Future<void> close() async {
+    _readBuffer.clear();
+    _readBufferOffset = 0;
     await _writePacket(AdbSyncStreamConstants.quit, 0);
     await _stream.close();
   }

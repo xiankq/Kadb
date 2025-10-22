@@ -13,11 +13,14 @@ export 'src/stream/adb_stream.dart';
 export 'src/stream/adb_shell_stream.dart';
 export 'src/shell/adb_shell_response.dart';
 export 'src/stream/adb_sync_stream.dart';
-export 'src/forwarding/tcp_forwarding.dart';
+export 'src/forward/tcp_forwarder.dart';
+export 'src/forward/direct_forwarder.dart';
 export 'src/security/pairing_connection_ctx.dart';
 
 import 'dart:async';
 import 'dart:io';
+import 'package:kadb_dart/src/forward/direct_forwarder.dart';
+
 import 'src/core/adb_connection.dart';
 import 'src/security/adb_key_pair.dart';
 import 'src/security/cert_utils.dart';
@@ -25,7 +28,7 @@ import 'src/stream/adb_shell_stream.dart';
 import 'src/shell/adb_shell_response.dart';
 import 'src/stream/adb_sync_stream.dart';
 import 'src/stream/adb_stream.dart';
-import 'src/forwarding/tcp_forwarding.dart';
+import 'src/forward/tcp_forwarder.dart';
 
 /// ADB客户端主类
 class KadbDart {
@@ -63,23 +66,33 @@ class KadbDart {
     return AdbSyncStream.open(connection);
   }
 
-  /// 创建转发管理器
-  static ForwardingManager createForwardingManager(
-    AdbConnection connection, {
-    bool debug = false,
-  }) {
-    return ForwardingManager(connection, debug: debug);
-  }
-
   /// 启动TCP端口转发
-  static Future<TcpForwarder> startTcpForward(
+  static Future<TcpForwarder> tcpForward(
     AdbConnection connection,
     int hostPort,
     String destination, {
     bool debug = false,
   }) async {
-    final manager = ForwardingManager(connection, debug: debug);
-    return await manager.startForwarding(hostPort, destination);
+    final forwarder = TcpForwarder(
+      connection,
+      hostPort,
+      destination,
+      debug: debug,
+    );
+    await forwarder.start();
+    return forwarder;
+  }
+
+  /// 类似Tcp转发，但不启动端口监听
+  static Future<DirectForwarder> directForward(
+    AdbConnection connection,
+    int hostPort,
+    String destination, {
+    bool debug = false,
+  }) async {
+    final forwarder = DirectForwarder(connection, destination, debug: debug);
+    await forwarder.connect();
+    return forwarder;
   }
 
   /// 创建配对连接
