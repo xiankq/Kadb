@@ -313,8 +313,12 @@ class KadbDart {
       }
     }
 
-    final totalSize = files.fold<int>(0, (sum, file) => sum + file.lengthSync());
-    final sessionCommand = 'pm install-create -S $totalSize ${options.join(' ')}';
+    final totalSize = files.fold<int>(
+      0,
+      (sum, file) => sum + file.lengthSync(),
+    );
+    final sessionCommand =
+        'pm install-create -S $totalSize ${options.join(' ')}';
     final shellStream = await executeShell(connection, sessionCommand);
     final sessionResponse = await shellStream.readAll();
 
@@ -327,7 +331,8 @@ class KadbDart {
 
         await push(connection, file.path, remotePath);
 
-        final writeCommand = 'pm install-write -S ${file.lengthSync()} $sessionId $i "$remotePath"';
+        final writeCommand =
+            'pm install-write -S ${file.lengthSync()} $sessionId $i "$remotePath"';
         final writeStream = await executeShell(connection, writeCommand);
         final writeResult = await writeStream.readAll();
 

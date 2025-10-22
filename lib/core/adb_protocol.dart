@@ -21,7 +21,6 @@ class AdbProtocol {
   static const int connectMaxdata = 1024 * 1024;
   static const int stlsVersion = 0x01000000;
 
-
   static final List<int> connectPayload = 'host::\u0000'.codeUnits;
 
   /// 获取协议版本
@@ -43,13 +42,31 @@ class AdbProtocol {
   }
 
   /// 生成ADB消息
-  static List<int> generateMessage(int command, int arg0, int arg1, List<int>? data) {
-    return generateMessageWithOffset(command, arg0, arg1, data, 0, data?.length ?? 0);
+  static List<int> generateMessage(
+    int command,
+    int arg0,
+    int arg1,
+    List<int>? data,
+  ) {
+    return generateMessageWithOffset(
+      command,
+      arg0,
+      arg1,
+      data,
+      0,
+      data?.length ?? 0,
+    );
   }
 
   /// 生成ADB消息（带偏移量）
   static List<int> generateMessageWithOffset(
-      int command, int arg0, int arg1, List<int>? data, int offset, int length) {
+    int command,
+    int arg0,
+    int arg1,
+    List<int>? data,
+    int offset,
+    int length,
+  ) {
     final message = <int>[];
 
     // 写入命令和参数（小端序）

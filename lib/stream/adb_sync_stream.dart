@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'adb_stream.dart';
 import '../core/adb_connection.dart';
 
-/// ADB同步流常量
+/// ADB同步流常量，定义了同步流的各种命令和状态
 class AdbSyncStreamConstants {
   static const String list = "LIST";
   static const String recv = "RECV";
@@ -28,7 +28,7 @@ class AdbSyncStreamConstants {
   };
 }
 
-/// 同步流数据包
+/// 同步流数据包，封装了同步流的消息ID和参数
 class SyncPacket {
   final String id;
   final int arg;
@@ -36,7 +36,7 @@ class SyncPacket {
   SyncPacket(this.id, this.arg);
 }
 
-/// 同步文件信息
+/// 同步文件信息，包含文件的基本属性
 class SyncFileInfo {
   final String name;
   final int mode;
@@ -46,7 +46,7 @@ class SyncFileInfo {
   SyncFileInfo(this.name, this.mode, this.size, this.lastModified);
 }
 
-/// 同步文件状态
+/// 同步文件状态，包含文件的状态信息
 class SyncFileStat {
   final int mode;
   final int size;
@@ -55,8 +55,7 @@ class SyncFileStat {
   SyncFileStat(this.mode, this.size, this.lastModified);
 }
 
-/// ADB同步流
-/// 用于文件同步操作
+/// ADB同步流，用于文件同步操作
 class AdbSyncStream {
   final AdbStream _stream;
   final List<int> _buffer = [];
@@ -165,7 +164,7 @@ class AdbSyncStream {
     }
 
     // 发送完成标记
-    final lastModifiedSec = (lastModifiedMs / 1000).round();
+    final lastModifiedSec = (lastModifiedMs / 100).round();
 
     await _writePacket(AdbSyncStreamConstants.done, lastModifiedSec);
 

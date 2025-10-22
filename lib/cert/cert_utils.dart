@@ -6,16 +6,9 @@ import 'package:asn1lib/asn1lib.dart' as asn1;
 import 'adb_key_pair.dart';
 import 'android_pubkey.dart';
 
-/// 证书工具类 - 统一的证书管理
-///
-/// 职责：
-/// - 密钥对的存储和加载
-/// - 公钥格式转换
-/// - PEM编码/解码
+/// 证书工具类，统一的证书管理
 class CertUtils {
   /// 加载或生成ADB密钥对 - 核心缓存机制
-  /// [cacheDir] 缓存目录路径，默认为'.android'
-  /// 返回AdbKeyPair对象
   static Future<AdbKeyPair> loadKeyPair({String cacheDir = '.android'}) async {
     final privateKeyFile = '$cacheDir/adbkey';
     final certificateFile = '$cacheDir/adbkey.pub';
@@ -63,7 +56,6 @@ class CertUtils {
     return keyPair;
   }
 
-  /// PEM编码/解码方法
   /// 将私钥导出为PEM格式
   static String toPrivateKeyPem(AdbKeyPair keyPair) {
     return _encodePrivateKeyPem(keyPair.privateKey);
@@ -108,9 +100,6 @@ class CertUtils {
   }
 
   /// 编码公钥并附加名称信息 - 与Kotlin版本一致
-  /// [keyPair] ADB密钥对
-  /// [name] 设备名称
-  /// 返回编码后的字节数组
   static Uint8List encodeWithName(AdbKeyPair keyPair, String name) {
     // 获取SSH格式的公钥
     final publicKeySsh = toPublicKeySsh(keyPair);

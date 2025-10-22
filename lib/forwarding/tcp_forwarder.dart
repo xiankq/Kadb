@@ -22,9 +22,7 @@ import '../exception/adb_stream_closed.dart';
 /// TCP转发器状态枚举
 enum TcpForwarderState { starting, started, stopping, stopped }
 
-/// TCP端口转发器
-/// 完整复刻Kotlin版本的实现，包括线程池、状态管理、超时处理等功能
-/// 支持两种模式：
+/// TCP端口转发器，支持两种模式：
 /// 1. TCP到TCP转发 (tcp:port -> tcp:targetPort)
 /// 2. TCP到任意ADB服务 (tcp:port -> localabstract:name, shell:command等)
 class TcpForwarder {
@@ -40,9 +38,6 @@ class TcpForwarder {
   Timer? _stateCheckTimer;
 
   /// 构造函数 - 任意ADB目标服务
-  /// [kadb] ADB连接
-  /// [hostPort] 本地端口
-  /// [destination] 目标服务，如 "tcp:8080", "localabstract:myservice", "shell:cat"
   TcpForwarder(
     this._kadb,
     this._hostPort,
@@ -52,9 +47,6 @@ class TcpForwarder {
        _debug = debug;
 
   /// 构造函数 - TCP到TCP转发（向后兼容）
-  /// [kadb] ADB连接
-  /// [hostPort] 本地端口
-  /// [targetPort] 目标端口
   TcpForwarder.tcpToTcp(
     this._kadb,
     this._hostPort,
@@ -65,11 +57,6 @@ class TcpForwarder {
        _debug = debug;
 
   /// 启动TCP转发
-  ///
-  /// 启动一个TCP服务器在指定端口，将所有连接转发到目标服务
-  ///
-  /// 抛出 [StateError] 如果转发器已经启动
-  /// 抛出 [SocketException] 如果无法绑定到指定端口
   Future<void> start() async {
     if (_state != TcpForwarderState.stopped) {
       throw StateError('Forwarder is already started at port $_hostPort');
@@ -98,8 +85,6 @@ class TcpForwarder {
   }
 
   /// 处理客户端连接
-  ///
-  /// 为每个客户端连接创建独立的处理进行双向数据转发
   Future<void> _handleClientConnection(Socket client) async {
     AdbStream? adbStream;
     try {
@@ -410,10 +395,6 @@ class TcpForwarder {
   }
 
   /// 停止TCP转发
-  ///
-  /// 关闭服务器，停止接受新的连接，并等待所有现有连接完成
-  ///
-  /// 等待最多5秒钟让服务器进入稳定状态，超时抛出 [TimeoutException]
   Future<void> stop() async {
     if (_state == TcpForwarderState.stopped ||
         _state == TcpForwarderState.stopping) {
@@ -478,12 +459,6 @@ class TcpForwarder {
   }
 
   /// 等待条件满足
-  ///
-  /// [test] 测试函数，返回true时停止等待
-  /// [interval] 检查间隔
-  /// [timeout] 超时时间
-  ///
-  /// 抛出 [TimeoutException] 如果超时
   Future<void> _waitFor(
     bool Function() test, {
     Duration interval = const Duration(milliseconds: 100),
@@ -516,9 +491,7 @@ class TcpForwarder {
   }
 }
 
-/// 反向TCP转发器
-///
-/// 将设备端口转发到本地端口
+/// 反向TCP转发器，将设备端口转发到本地端口
 class ReverseTcpForwarder {
   final AdbConnection _kadb;
   final int _devicePort;
@@ -537,8 +510,6 @@ class ReverseTcpForwarder {
   }) : _debug = debug;
 
   /// 启动反向TCP转发
-  ///
-  /// 在本地启动服务器，连接转发到设备端口
   Future<void> start() async {
     if (_state != TcpForwarderState.stopped) {
       throw StateError('反向转发器已在端口 $_hostPort 启动');

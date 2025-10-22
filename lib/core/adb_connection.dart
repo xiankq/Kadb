@@ -12,8 +12,7 @@ import '../transport/transport_channel.dart';
 import '../transport/socket_transport_channel.dart';
 import '../debug/logging.dart';
 
-/// ADB连接类
-/// 负责ADB协议的连接管理和流操作
+/// ADB连接类，负责ADB协议的连接管理和流操作
 class AdbConnection {
   static const int _maxId = 0x7FFFFFFF;
 
@@ -28,10 +27,6 @@ class AdbConnection {
   final Map<int, AdbStream> _streams = {};
   bool _closed = false;
 
-  /// 创建ADB连接
-  /// [keyPair] ADB密钥对
-  /// [ioTimeout] IO操作超时时间
-  /// [debug] 是否启用调试模式
   AdbConnection({
     required AdbKeyPair keyPair,
     this.ioTimeout = const Duration(seconds: 30),
@@ -40,9 +35,6 @@ class AdbConnection {
        _debug = debug;
 
   /// 连接到ADB服务器
-  /// [host] 主机地址
-  /// [port] 端口号
-  /// [useTls] 是否使用TLS加密
   Future<void> connect(String host, int port, {bool useTls = false}) async {
     if (_closed) {
       throw StateError('连接已关闭');
@@ -56,11 +48,8 @@ class AdbConnection {
     // 生成系统身份标识
     final systemIdentity = CertUtils.generateSystemIdentity();
 
-    // 发送初始连接请求
-    // 重要修复：使用与系统ADB一致的payload格式
-    // 系统ADB发送的payload是 'host::用户@主机名\u0000'，总长度25字节
+    // 发送初始连接请求 - 使用与系统ADB一致的payload格式
     final connectPayload = 'host::$systemIdentity\u0000';
-
     Logging.verbose('发送连接请求: $connectPayload');
 
     await _writer.writeConnect(
@@ -77,12 +66,10 @@ class AdbConnection {
 
   /// 建立网络连接
   Future<void> _establishConnection(String host, int port) async {
-    // 创建Socket传输通道
     final socketChannel = SocketTransportChannel();
     await socketChannel.connect(host, port, timeout: ioTimeout);
     _currentChannel = socketChannel;
 
-    // 创建读写器
     final reader = AdbReader((int length) async {
       final buffer = Uint8List(length);
       await _currentChannel.readExactly(buffer, ioTimeout);
@@ -93,7 +80,6 @@ class AdbConnection {
       await _currentChannel.write(Uint8List.fromList(data), ioTimeout);
     }, debug: _debug);
 
-    // 创建消息队列
     _messageQueue = AdbMessageQueue(reader);
   }
 
@@ -104,23 +90,19 @@ class AdbConnection {
 
       while (true) {
         message = await _messageQueue.next();
-
         Logging.verbose('收到认证消息: ${_messageToString(message.command)}');
 
         switch (message.command) {
           case AdbProtocol.cmdStls:
-            // 暂时不支持TLS升级
             Logging.error('TLS升级功能暂未实现');
             throw UnsupportedError('TLS升级功能暂未实现');
 
           case AdbProtocol.cmdAuth:
-            // 直接处理认证流程
             Logging.status('开始认证流程...');
             await _performAuthentication(message, systemIdentity);
             return;
 
           case AdbProtocol.cmdCnxn:
-            // 直接连接成功，无需认证
             Logging.status('连接成功，无需认证');
             return;
 
@@ -239,7 +221,6 @@ class AdbConnection {
   }
 
   /// 打开ADB流
-  /// [destination] 目标服务
   Future<AdbStream> open(String destination) async {
     if (_closed) {
       throw StateError('连接已关闭');
@@ -314,8 +295,6 @@ class AdbConnection {
   bool get isClosed => _closed;
 
   /// 检查是否支持特定功能（占位实现）
-  /// [feature] 功能名称
-  /// 返回是否支持该功能
   bool supportsFeature(String feature) {
     // 目前返回false，后续根据实际功能实现
     return false;

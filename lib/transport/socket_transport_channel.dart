@@ -4,8 +4,7 @@ import 'dart:typed_data';
 
 import 'transport_channel.dart';
 
-/// Socket传输通道
-/// 实现基于Socket的ADB传输通道
+/// Socket传输通道，实现基于Socket的ADB传输通道
 class SocketTransportChannel implements TransportChannel {
   Socket? _socket;
   final List<int> _readBuffer = [];

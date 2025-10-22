@@ -4,7 +4,8 @@ class AdbStreamClosed implements Exception {
   final int localId;
   final String message;
 
-  AdbStreamClosed(this.localId, [String? message]) : message = message ?? 'ADB流已关闭，本地ID: 0x${localId.toRadixString(16)}';
+  AdbStreamClosed(this.localId, [String? message])
+    : message = message ?? 'ADB流已关闭，本地ID: 0x${localId.toRadixString(16)}';
 
   @override
   String toString() => 'AdbStreamClosed: $message';

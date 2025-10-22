@@ -6,7 +6,7 @@ import '../core/adb_protocol.dart';
 import '../core/adb_reader.dart';
 import '../exception/adb_stream_closed.dart';
 
-/// ADB消息队列
+/// ADB消息队列，负责管理ADB协议的消息队列和流操作
 class AdbMessageQueue {
   static const int _defaultTimeoutSeconds = 10;
   static const int _nextTimeoutSeconds = 45;
@@ -21,17 +21,20 @@ class AdbMessageQueue {
 
   AdbMessageQueue(this._adbReader);
 
+  /// 开始监听指定本地ID的消息
   void startListening(int localId) {
     if (_isClosed) throw StateError('消息队列已关闭');
     _openStreams.add(localId);
     _queues[localId] = {};
   }
 
+  /// 停止监听指定本地ID的消息
   void stopListening(int localId) {
     _openStreams.remove(localId);
     _queues.remove(localId);
   }
 
+  /// 获取指定本地ID和命令的消息
   Future<AdbMessage> take(int localId, int command) async {
     if (_isClosed) throw StateError('消息队列已关闭');
 
@@ -73,7 +76,8 @@ class AdbMessageQueue {
           return;
         }
 
-        if (_getLocalId(message) == localId && _getCommand(message) == command) {
+        if (_getLocalId(message) == localId &&
+            _getCommand(message) == command) {
           if (!messageReceived && !completer.isCompleted) {
             messageReceived = true;
             completer.complete(message);
@@ -89,6 +93,7 @@ class AdbMessageQueue {
     }
   }
 
+  /// 获取指定本地ID和命令的消息（无超时）
   Future<AdbMessage> _takeWithoutTimeout(int localId, int command) async {
     if (_isClosed) throw StateError('消息队列已关闭');
 
@@ -110,7 +115,8 @@ class AdbMessageQueue {
           return;
         }
 
-        if (_getLocalId(message) == localId && _getCommand(message) == command) {
+        if (_getLocalId(message) == localId &&
+            _getCommand(message) == command) {
           if (!messageReceived && !completer.isCompleted) {
             messageReceived = true;
             completer.complete(message);
@@ -127,6 +133,7 @@ class AdbMessageQueue {
     }
   }
 
+  /// 轮询指定本地ID和命令的消息
   AdbMessage? _poll(int localId, int command) {
     final streamQueues = _queues[localId];
     if (streamQueues == null) throw StateError('未监听本地ID: $localId');
@@ -145,12 +152,14 @@ class AdbMessageQueue {
     }
   }
 
+  /// 开始读取消息
   void _startReading() {
     if (_isReading || _isClosed) return;
     _isReading = true;
     _readMessages();
   }
 
+  /// 读取消息
   void _readMessages() async {
     while (!_isClosed && _isReading) {
       try {
@@ -195,10 +204,17 @@ class AdbMessageQueue {
     }
   }
 
+  /// 获取消息的本地ID
   int _getLocalId(AdbMessage message) => message.arg1;
-  int _getCommand(AdbMessage message) => message.command;
-  bool _isCloseCommand(AdbMessage message) => message.command == AdbProtocol.cmdClse;
 
+  /// 获取消息的命令
+  int _getCommand(AdbMessage message) => message.command;
+
+  /// 检查是否是关闭命令
+  bool _isCloseCommand(AdbMessage message) =>
+      message.command == AdbProtocol.cmdClse;
+
+  /// 获取下一个消息
   Future<AdbMessage> next() async {
     if (_isClosed) throw StateError('消息队列已关闭');
     if (!_isReading) _startReading();
@@ -284,7 +300,9 @@ class AdbMessageQueue {
 
     final timer = Timer(timeout, () {
       if (!messageReceived) {
-        completer.completeError(TimeoutException('等待消息超时: localId=$localId, command=$command'));
+        completer.completeError(
+          TimeoutException('等待消息超时: localId=$localId, command=$command'),
+        );
       }
     });
 
@@ -299,7 +317,8 @@ class AdbMessageQueue {
       if (!_isReading) _startReading();
 
       final subscription = _messageController.stream.listen((message) {
-        if (_getLocalId(message) == localId && _getCommand(message) == command) {
+        if (_getLocalId(message) == localId &&
+            _getCommand(message) == command) {
           if (!messageReceived && !completer.isCompleted) {
             messageReceived = true;
             timer.cancel();
@@ -316,12 +335,21 @@ class AdbMessageQueue {
     }
   }
 
+  /// 关闭消息队列
   void close() {
-    _isClosed = true;
-    _isReading = false;
-    _queues.clear();
-    _openStreams.clear();
-    _messageController.close();
-    _adbReader.close();
+    if (!_isClosed) {
+      _isClosed = true;
+      _isReading = false;
+      _queues.clear();
+      _openStreams.clear();
+      _messageController.close();
+      _adbReader.close();
+    }
   }
+
+  /// 检查消息队列是否关闭
+  bool get isClosed => _isClosed;
+
+  /// 检查消息队列是否正在读取
+  bool get isReading => _isReading;
 }

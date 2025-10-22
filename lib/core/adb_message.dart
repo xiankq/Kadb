@@ -3,8 +3,7 @@ import 'dart:convert';
 import 'adb_protocol.dart';
 import '../utils/byte_utils.dart';
 
-/// ADB消息类
-/// 表示ADB协议中的一个完整消息
+/// ADB消息类，表示ADB协议中的一个完整消息
 class AdbMessage {
   final int command;
   final int arg0;
@@ -113,7 +112,6 @@ class AdbMessage {
     return '[sync] $id($arg)';
   }
 
-  
   String _argStr(int arg) => arg.toRadixString(16).toUpperCase();
 
   String _commandStr() {

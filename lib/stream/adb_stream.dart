@@ -6,7 +6,7 @@ import '../core/adb_writer.dart';
 import '../queue/adb_message_queue.dart';
 import '../exception/adb_stream_closed.dart';
 
-/// ADB流数据源接口
+/// ADB流数据源接口，定义了流数据的基本操作
 abstract class AdbStreamSource {
   /// 获取数据流
   Stream<List<int>> get stream;
@@ -27,7 +27,7 @@ abstract class AdbStreamSource {
   Future<void> close();
 }
 
-/// ADB流数据接收器接口
+/// ADB流数据接收器接口，定义了流数据的写入操作
 abstract class AdbStreamSink {
   /// 写入一个字节
   Future<void> writeByte(int byte);
@@ -48,7 +48,7 @@ abstract class AdbStreamSink {
   Future<void> close();
 }
 
-/// ADB流类
+/// ADB流类，负责ADB协议的流管理和数据传输
 class AdbStream {
   static const int _chunkSize = 128 * 1024;
   static const int _remoteIdAssignmentTimeoutSeconds = 5;
@@ -59,8 +59,10 @@ class AdbStream {
   int _remoteId;
   final Completer<void> _remoteIdCompleter = Completer<void>();
 
-  final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
-  final StreamController<void> _closeController = StreamController<void>.broadcast();
+  final StreamController<Uint8List> _dataController =
+      StreamController<Uint8List>.broadcast();
+  final StreamController<void> _closeController =
+      StreamController<void>.broadcast();
 
   bool _isClosed = false;
   bool _isReading = false;
@@ -92,19 +94,27 @@ class AdbStream {
   Future<void> waitForRemoteId() => _remoteIdCompleter.future;
   int get remoteId => _remoteId;
 
+  /// 写入数据到ADB流
   Future<void> write(Uint8List data) async {
     if (_isClosed) throw StateError('流已关闭');
 
     try {
       final chunks = _splitData(data);
       for (final chunk in chunks) {
-        await _adbWriter.writeWrite(_localId, _remoteId, chunk, 0, chunk.length);
+        await _adbWriter.writeWrite(
+          _localId,
+          _remoteId,
+          chunk,
+          0,
+          chunk.length,
+        );
       }
     } catch (e) {
       throw StateError('写入数据失败: $e');
     }
   }
 
+  /// 关闭ADB流
   Future<void> close() async {
     if (_isClosed) return;
 
@@ -127,6 +137,7 @@ class AdbStream {
     await _closeController.close();
   }
 
+  /// 开始读取ADB流数据
   void _startReading() {
     if (_isReading) return;
     _isReading = true;
@@ -138,6 +149,7 @@ class AdbStream {
     });
   }
 
+  /// 读取ADB流数据循环
   Future<void> _readLoop() async {
     try {
       await _waitForRemoteIdAssignment();
@@ -158,8 +170,10 @@ class AdbStream {
         await _adbWriter.writeOkay(_localId, _remoteId);
       } catch (e) {
         if (!_isClosed) {
-          if (e is AdbStreamClosed || e.toString().contains('AdbStreamClosed') ||
-              e.toString().contains('CLSE') || e.toString().contains('消息队列已关闭')) {
+          if (e is AdbStreamClosed ||
+              e.toString().contains('AdbStreamClosed') ||
+              e.toString().contains('CLSE') ||
+              e.toString().contains('消息队列已关闭')) {
             await close();
             break;
           }
@@ -170,6 +184,7 @@ class AdbStream {
     _isReading = false;
   }
 
+  /// 等待远程ID分配
   Future<void> _waitForRemoteIdAssignment() async {
     for (int attempts = 1; attempts <= 3 && !_isClosed; attempts++) {
       try {
@@ -196,13 +211,16 @@ class AdbStream {
     }
   }
 
+  /// 分割数据为块
   List<Uint8List> _splitData(Uint8List data) {
     if (data.length <= _chunkSize) return [data];
 
     final chunks = <Uint8List>[];
     for (int offset = 0; offset < data.length; offset += _chunkSize) {
       final end = offset + _chunkSize;
-      final actualChunkSize = end > data.length ? data.length - offset : _chunkSize;
+      final actualChunkSize = end > data.length
+          ? data.length - offset
+          : _chunkSize;
       chunks.add(data.sublist(offset, offset + actualChunkSize));
     }
     return chunks;

@@ -5,8 +5,7 @@ import 'adb_message.dart';
 import 'adb_protocol.dart';
 import '../debug/logging.dart';
 
-/// ADB消息写入器
-/// 负责向数据目标写入ADB协议消息
+/// ADB消息写入器，负责向数据目标写入ADB协议消息
 class AdbWriter {
   final Future<void> Function(List<int>) _writeBytes;
   final bool _debug;

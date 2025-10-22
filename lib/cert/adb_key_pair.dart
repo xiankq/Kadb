@@ -1,13 +1,10 @@
-/// ADB密钥对类
-library;
-
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:pointycastle/export.dart';
 import '../core/adb_message.dart';
 import 'android_pubkey.dart';
 
-/// ADB密钥对类
+/// ADB密钥对类，负责ADB协议的密钥管理和签名操作
 class AdbKeyPair {
   final RSAPrivateKey _privateKey;
   final RSAPublicKey _publicKey;

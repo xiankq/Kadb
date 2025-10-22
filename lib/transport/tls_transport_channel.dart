@@ -5,8 +5,7 @@ import 'dart:typed_data';
 import 'transport_channel.dart';
 import 'socket_transport_channel.dart';
 
-/// TLS传输通道
-/// 实现基于TLS的ADB安全传输通道
+/// TLS传输通道，实现基于TLS的ADB安全传输通道
 class TlsTransportChannel implements TransportChannel {
   final SecureSocket _secureSocket;
   final InternetAddress _remoteAddress;

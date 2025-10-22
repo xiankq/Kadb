@@ -5,8 +5,7 @@ import 'dart:typed_data';
 import '../core/adb_connection.dart';
 import 'adb_stream.dart';
 
-/// ADB Shell流类
-/// 管理ADB协议的Shell命令执行
+/// ADB Shell流类，管理ADB协议的Shell命令执行
 class AdbShellStream {
   final AdbStream _adbStream;
   final StreamController<String> _stdoutController =
@@ -33,10 +32,6 @@ class AdbShellStream {
   Stream<int> get exitCode => _exitCodeController.stream;
 
   /// 执行Shell命令
-  /// [command] Shell命令字符串
-  /// [args] 命令参数列表
-  /// [debug] 是否启用调试模式
-  /// 返回AdbShellStream实例
   static Future<AdbShellStream> execute(
     AdbConnection connection,
     String command, [
@@ -49,7 +44,6 @@ class AdbShellStream {
   }
 
   /// 写入数据到Shell输入
-  /// [data] 要写入的数据
   Future<void> write(String data) async {
     if (_isClosed) {
       throw StateError('Shell流已关闭');
@@ -60,7 +54,6 @@ class AdbShellStream {
   }
 
   /// 读取所有标准输出内容
-  /// 返回完整的输出字符串
   Future<String> readAll({
     Duration timeout = const Duration(seconds: 10),
   }) async {

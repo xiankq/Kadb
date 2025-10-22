@@ -2,8 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-/// 传输通道接口
-/// 抽象网络连接，支持同步和异步IO操作
+/// 传输通道接口，抽象网络连接，支持同步和异步IO操作
 abstract class TransportChannel {
   /// 从通道读取数据到缓冲区
   /// [dst] 目标缓冲区
