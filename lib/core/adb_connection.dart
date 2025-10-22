@@ -8,7 +8,7 @@ import 'adb_reader.dart';
 import 'adb_writer.dart';
 import '../queue/adb_message_queue.dart';
 import '../stream/adb_stream.dart';
-import '../transport/transport_channel.dart' as base;
+import '../transport/transport_channel.dart';
 import '../transport/socket_transport_channel.dart';
 import '../debug/logging.dart';
 
@@ -23,7 +23,7 @@ class AdbConnection {
 
   late AdbMessageQueue _messageQueue;
   late AdbWriter _writer;
-  late base.TransportChannel _currentChannel;
+  late TransportChannel _currentChannel;
   int _nextLocalId = 1;
   final Map<int, AdbStream> _streams = {};
   bool _closed = false;

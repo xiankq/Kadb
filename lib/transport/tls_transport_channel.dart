@@ -2,17 +2,17 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'transport_channel.dart' as base;
-import 'socket_transport_channel.dart' as socket_channel;
+import 'transport_channel.dart';
+import 'socket_transport_channel.dart';
 
 /// TLS传输通道
 /// 实现基于TLS的ADB安全传输通道
-class TlsTransportChannel implements base.TransportChannel {
+class TlsTransportChannel implements TransportChannel {
   final SecureSocket _secureSocket;
   final InternetAddress _remoteAddress;
   final List<int> _readBuffer = [];
   bool _isClosed = false;
-  
+
   TlsTransportChannel._internal(this._secureSocket, this._remoteAddress);
 
   /// 升级Socket通道到TLS通道
@@ -20,13 +20,13 @@ class TlsTransportChannel implements base.TransportChannel {
   /// [port] 端口号（需要从外部传入）
   /// 返回TlsTransportChannel实例
   static Future<TlsTransportChannel> upgrade(
-    base.TransportChannel channel,
+    TransportChannel channel,
     int port,
   ) async {
-    if (channel is! socket_channel.SocketTransportChannel) {
+    if (channel is! SocketTransportChannel) {
       throw Exception('只能升级SocketTransportChannel到TLS');
     }
-    
+
     try {
       // 直接使用Socket.connect创建新的TLS连接
       // 因为Dart不支持直接获取SocketTransportChannel的底层Socket
@@ -42,10 +42,10 @@ class TlsTransportChannel implements base.TransportChannel {
           return true;
         },
       );
-      
+
       // 关闭原始通道
       await channel.close();
-      
+
       return TlsTransportChannel._internal(secureSocket, remoteAddress);
     } catch (e) {
       throw Exception('TLS升级失败: $e');
@@ -55,7 +55,7 @@ class TlsTransportChannel implements base.TransportChannel {
   @override
   Future<int> read(Uint8List dst, Duration timeout) async {
     if (_isClosed) throw Exception('通道已关闭');
-    
+
     // 如果缓冲区已有足够数据，直接返回
     if (_readBuffer.length >= dst.length) {
       final bytesToCopy = dst.length;
@@ -64,7 +64,7 @@ class TlsTransportChannel implements base.TransportChannel {
       }
       return bytesToCopy;
     }
-    
+
     // 等待数据到达
     final completer = Completer<int>();
     late StreamSubscription<List<int>> subscription;
@@ -72,7 +72,7 @@ class TlsTransportChannel implements base.TransportChannel {
       subscription.cancel();
       completer.completeError(TimeoutException('TLS读取超时'));
     });
-    
+
     subscription = _secureSocket.listen(
       (data) {
         _readBuffer.addAll(data);
@@ -97,17 +97,20 @@ class TlsTransportChannel implements base.TransportChannel {
         completer.complete(-1);
       },
     );
-    
+
     return completer.future;
   }
 
   @override
   Future<int> write(Uint8List src, Duration timeout) async {
     if (_isClosed) throw Exception('通道已关闭');
-    
+
     final completer = Completer<int>();
-    final timer = Timer(timeout, () => completer.completeError(TimeoutException('TLS写入超时')));
-    
+    final timer = Timer(
+      timeout,
+      () => completer.completeError(TimeoutException('TLS写入超时')),
+    );
+
     try {
       _secureSocket.add(src);
       await _secureSocket.flush();
@@ -117,7 +120,7 @@ class TlsTransportChannel implements base.TransportChannel {
       timer.cancel();
       completer.completeError(e);
     }
-    
+
     return completer.future;
   }
 
@@ -126,7 +129,11 @@ class TlsTransportChannel implements base.TransportChannel {
     var totalRead = 0;
     while (totalRead < dst.length) {
       final remaining = dst.length - totalRead;
-      final chunk = Uint8List.sublistView(dst, totalRead, totalRead + remaining);
+      final chunk = Uint8List.sublistView(
+        dst,
+        totalRead,
+        totalRead + remaining,
+      );
       final bytesRead = await read(chunk, timeout);
       if (bytesRead <= 0) {
         throw Exception('TLS连接已关闭');

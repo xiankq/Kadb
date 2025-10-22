@@ -2,27 +2,26 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'transport_channel.dart' as base;
+import 'transport_channel.dart';
 
 /// Socket传输通道
 /// 实现基于Socket的ADB传输通道
-class SocketTransportChannel implements base.TransportChannel {
+class SocketTransportChannel implements TransportChannel {
   Socket? _socket;
   final List<int> _readBuffer = [];
   Completer<void> _dataAvailable = Completer<void>();
   bool _isConnected = false;
   bool _listenerStarted = false;
-  
+
   SocketTransportChannel();
 
-  @override
   Future<void> connect(String host, int port, {Duration? timeout}) async {
     try {
       final addresses = await InternetAddress.lookup(host);
       if (addresses.isEmpty) {
         throw Exception('无法解析主机地址: $host');
       }
-      
+
       _socket = await Socket.connect(addresses.first, port, timeout: timeout);
       _isConnected = true;
       _startSocketListener();
@@ -37,7 +36,7 @@ class SocketTransportChannel implements base.TransportChannel {
   void _startSocketListener() {
     if (_listenerStarted) return;
     _listenerStarted = true;
-    
+
     _socket!.listen(
       (data) {
         _readBuffer.addAll(data);
@@ -63,7 +62,7 @@ class SocketTransportChannel implements base.TransportChannel {
     if (_socket == null || !_isConnected) {
       throw Exception('通道未连接');
     }
-    
+
     var totalRead = 0;
     while (totalRead < buffer.length) {
       // 如果缓冲区有足够数据，批量读取
@@ -74,7 +73,7 @@ class SocketTransportChannel implements base.TransportChannel {
         totalRead += bytesToRead;
         continue;
       }
-      
+
       // 如果缓冲区数据不足，批量读取可用数据
       if (_readBuffer.isNotEmpty) {
         final bytesToRead = _readBuffer.length;
@@ -82,7 +81,7 @@ class SocketTransportChannel implements base.TransportChannel {
         _readBuffer.removeRange(0, bytesToRead);
         totalRead += bytesToRead;
       }
-      
+
       // 等待更多数据到达
       try {
         await _dataAvailable.future.timeout(timeout);
@@ -139,16 +138,18 @@ class SocketTransportChannel implements base.TransportChannel {
     if (_socket == null || !_isConnected) {
       throw Exception('通道未连接');
     }
-    
+
     var totalRead = 0;
     if (_readBuffer.isNotEmpty) {
-      final bytesToRead = _readBuffer.length < buffer.length ? _readBuffer.length : buffer.length;
+      final bytesToRead = _readBuffer.length < buffer.length
+          ? _readBuffer.length
+          : buffer.length;
       for (int i = 0; i < bytesToRead; i++) {
         buffer[i] = _readBuffer.removeAt(0);
       }
       totalRead = bytesToRead;
     }
-    
+
     return totalRead;
   }
 
@@ -194,7 +195,8 @@ class SocketTransportChannel implements base.TransportChannel {
   bool get isOpen => _isConnected;
 
   @override
-  InternetAddress get localAddress => _socket?.address ?? InternetAddress('0.0.0.0');
+  InternetAddress get localAddress =>
+      _socket?.address ?? InternetAddress('0.0.0.0');
 
   @override
   InternetAddress get remoteAddress {
