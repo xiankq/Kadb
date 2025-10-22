@@ -48,25 +48,6 @@ class KadbDart {
     return connection;
   }
 
-  @Deprecated('使用create方法替代')
-  static Future<AdbConnection> connect({
-    String host = 'localhost',
-    int port = 5037,
-    AdbKeyPair? keyPair,
-    int connectTimeoutMs = 10000,
-    int ioTimeoutMs = 30000,
-    bool debug = false,
-  }) async {
-    return create(
-      host: host,
-      port: port,
-      keyPair: keyPair,
-      connectTimeoutMs: connectTimeoutMs,
-      ioTimeoutMs: ioTimeoutMs,
-      debug: debug,
-    );
-  }
-
   /// 执行Shell命令
   static Future<AdbShellStream> executeShell(
     AdbConnection connection,
@@ -99,27 +80,6 @@ class KadbDart {
   }) async {
     final manager = ForwardingManager(connection, debug: debug);
     return await manager.startForwarding(hostPort, destination);
-  }
-
-  /// 尝试连接
-  static Future<AdbConnection?> tryConnection({
-    String host = 'localhost',
-    int port = 5037,
-  }) async {
-    try {
-      final connection = await create(host: host, port: port);
-      final shellStream = await executeShell(connection, 'echo success');
-      final result = await shellStream.readAll();
-
-      if (result.trim() == 'success') {
-        return connection;
-      } else {
-        connection.close();
-        return null;
-      }
-    } catch (e) {
-      return null;
-    }
   }
 
   /// 创建配对连接

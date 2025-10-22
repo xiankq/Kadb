@@ -135,7 +135,7 @@ class TcpForwarder {
   }
 
   /// 从Socket转发到ADB流
-  Future<void> _forwardToStream(Socket source, dynamic sink) async {
+  Future<void> _forwardToStream(Socket source, AdbStreamSink sink) async {
     try {
       await for (final data in source) {
         await sink.writeBytes(data);
@@ -147,7 +147,7 @@ class TcpForwarder {
   }
 
   /// 从ADB流转发的Socket
-  Future<void> _forwardFromStream(dynamic source, Socket sink) async {
+  Future<void> _forwardFromStream(AdbStreamSource source, Socket sink) async {
     try {
       await for (final data in source.stream) {
         sink.add(data);
