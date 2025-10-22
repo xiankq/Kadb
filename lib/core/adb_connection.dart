@@ -14,8 +14,6 @@ import '../debug/logging.dart';
 
 /// ADB连接类，负责ADB协议的连接管理和流操作
 class AdbConnection {
-  static const int _maxId = 0x7FFFFFFF;
-
   final AdbKeyPair _keyPair;
   final Duration ioTimeout;
   final bool _debug;
@@ -23,8 +21,6 @@ class AdbConnection {
   late AdbMessageQueue _messageQueue;
   late AdbWriter _writer;
   late TransportChannel _currentChannel;
-  int _nextLocalId = 1;
-  final Map<int, AdbStream> _streams = {};
   bool _closed = false;
 
   AdbConnection({
@@ -41,26 +37,19 @@ class AdbConnection {
     }
 
     Logging.status('正在连接到 $host:$port...');
-
-    // 建立网络连接
     await _establishConnection(host, port);
 
-    // 生成系统身份标识
     final systemIdentity = CertUtils.generateSystemIdentity();
-
-    // 发送初始连接请求 - 使用与系统ADB一致的payload格式
     final connectPayload = 'host::$systemIdentity\u0000';
-    Logging.verbose('发送连接请求: $connectPayload');
 
+    Logging.verbose('发送连接请求: $connectPayload');
     await _writer.writeConnect(
       version: AdbProtocol.version,
       maxData: AdbProtocol.maxPayload,
       systemIdentityString: connectPayload,
     );
 
-    // 处理认证流程
     await _handleAuthentication(systemIdentity);
-
     Logging.status('ADB连接成功建立');
   }
 
@@ -226,7 +215,7 @@ class AdbConnection {
       throw StateError('连接已关闭');
     }
 
-    final localId = _newId();
+    final localId = _generateLocalId();
     final stream = AdbStream(
       localId: localId,
       remoteId: 0,
@@ -236,30 +225,19 @@ class AdbConnection {
       debug: _debug,
     );
 
-    _streams[localId] = stream;
-
     // 发送打开流请求
     await _writer.writeOpen(localId, destination);
 
     // 等待远程ID分配
     await stream.waitForRemoteId();
 
-    // 监听流关闭事件，自动清理
-    stream.closeStream.listen((_) {
-      _streams.remove(localId);
-      if (_debug) {
-        print('ADB流: localId=$localId 已自动清理');
-      }
-    });
-
     return stream;
   }
 
   /// 生成新的本地ID
-  int _newId() {
-    final id = _nextLocalId;
-    _nextLocalId = (_nextLocalId + 1) % _maxId;
-    return id;
+  int _generateLocalId() {
+    const maxId = 0x7FFFFFFF;
+    return DateTime.now().millisecondsSinceEpoch % maxId;
   }
 
   /// 关闭连接
@@ -278,16 +256,6 @@ class AdbConnection {
       } catch (e) {
         // 忽略通道关闭时的异常
       }
-
-      // 关闭所有打开的流
-      for (final stream in _streams.values) {
-        try {
-          stream.close();
-        } catch (e) {
-          // 忽略流关闭时的异常
-        }
-      }
-      _streams.clear();
     }
   }
 

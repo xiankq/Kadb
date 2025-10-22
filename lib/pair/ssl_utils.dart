@@ -1,47 +1,16 @@
-// 导入必要的加密库
-import 'dart:math';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
-import 'package:pointycastle/api.dart';
-import 'package:pointycastle/block/aes.dart';
-import 'package:pointycastle/block/modes/cbc.dart';
-import 'package:pointycastle/digests/sha256.dart';
-import 'package:pointycastle/macs/hmac.dart';
-import 'package:pointycastle/asymmetric/api.dart';
-import 'package:pointycastle/asymmetric/oaep.dart';
-import 'package:pointycastle/asymmetric/rsa.dart';
-import 'package:pointycastle/signers/rsa_signer.dart';
+import 'package:pointycastle/export.dart';
 import '../cert/adb_key_pair.dart';
+import '../crypto/crypto_utils.dart';
 
 /// SSL工具类
 /// 用于处理SSL/TLS相关的工具函数
 class SslUtils {
-  /// 生成随机字节
-  static Uint8List generateRandomBytes(int length) {
-    final random = Random.secure();
-    final bytes = Uint8List(length);
-    for (int i = 0; i < length; i++) {
-      bytes[i] = random.nextInt(256);
-    }
-    return bytes;
-  }
-
-  /// 计算SHA256哈希
-  static Uint8List sha256(Uint8List data) {
-    final digest = SHA256Digest();
-    return digest.process(data);
-  }
-
-  /// 计算HMAC-SHA256
-  static Uint8List hmacSha256(Uint8List key, Uint8List data) {
-    final hmac = HMac(SHA256Digest(), 64);
-    hmac.init(KeyParameter(key));
-    return hmac.process(data);
-  }
-
   /// 生成AES密钥
   static Uint8List generateAesKey() {
-    return generateRandomBytes(32); // 256位AES密钥
+    return CryptoUtils.generateRandomBytes(32); // 256位AES密钥
   }
 
   /// AES加密

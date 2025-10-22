@@ -5,6 +5,7 @@ import 'package:pointycastle/export.dart';
 import 'package:asn1lib/asn1lib.dart' as asn1;
 import 'adb_key_pair.dart';
 import 'android_pubkey.dart';
+import '../crypto/crypto_utils.dart';
 
 /// 证书工具类，统一的证书管理
 class CertUtils {
@@ -346,22 +347,7 @@ class CertUtils {
 
   /// 将大整数编码为字节数组
   static Uint8List _encodeBigInt(BigInt value) {
-    var hex = value.toRadixString(16);
-    if (hex.length % 2 != 0) {
-      hex = '0$hex';
-    }
-
-    final bytes = <int>[];
-    for (var i = 0; i < hex.length; i += 2) {
-      bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
-    }
-
-    // 确保最高位不为0
-    if (bytes.isNotEmpty && bytes[0] >= 0x80) {
-      bytes.insert(0, 0);
-    }
-
-    return Uint8List.fromList(bytes);
+    return CryptoUtils.bigIntToBytes(value);
   }
 
   /// 验证RSA密钥参数完整性（防止时间退化的关键修复）

@@ -135,11 +135,7 @@ class AdbWriter {
 
   /// 计算负载数据的校验和
   int _payloadChecksum(List<int> payload) {
-    int checksum = 0;
-    for (final byte in payload) {
-      checksum += byte & 0xFF;
-    }
-    return checksum;
+    return AdbProtocol.getPayloadChecksum(payload, 0, payload.length);
   }
 
   /// 关闭写入器

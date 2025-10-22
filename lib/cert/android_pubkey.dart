@@ -2,6 +2,7 @@ library;
 
 import 'dart:typed_data';
 import 'package:pointycastle/asymmetric/api.dart';
+import '../crypto/crypto_utils.dart';
 
 /// Android公钥格式编码和解码类，基于Kotlin原项目完整实现Android RSA公钥格式
 /// Android公钥工具类
@@ -213,21 +214,6 @@ class AndroidPubkey {
 
   /// 将大整数转换为字节数组
   static Uint8List _bigIntToBytes(BigInt value) {
-    var hex = value.toRadixString(16);
-    if (hex.length % 2 != 0) {
-      hex = '0$hex';
-    }
-
-    final bytes = <int>[];
-    for (var i = 0; i < hex.length; i += 2) {
-      bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
-    }
-
-    // 确保最高位不为0
-    if (bytes.isNotEmpty && bytes[0] >= 0x80) {
-      bytes.insert(0, 0);
-    }
-
-    return Uint8List.fromList(bytes);
+    return CryptoUtils.bigIntToBytes(value);
   }
 }

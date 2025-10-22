@@ -6,46 +6,107 @@ import '../core/adb_writer.dart';
 import '../queue/adb_message_queue.dart';
 import '../exception/adb_stream_closed.dart';
 
-/// ADB流数据源接口，定义了流数据的基本操作
-abstract class AdbStreamSource {
+/// ADB流数据源，提供流数据的基本操作
+class AdbStreamSource {
+  final AdbStream _stream;
+  final StreamController<Uint8List> _dataController =
+      StreamController<Uint8List>();
+  final Completer<void> _closeCompleter = Completer<void>();
+
+  AdbStreamSource(this._stream) {
+    _stream.dataStream.listen(
+      (data) {
+        _dataController.add(data);
+      },
+      onDone: () {
+        _dataController.close();
+        _closeCompleter.complete();
+      },
+    );
+  }
+
   /// 获取数据流
-  Stream<List<int>> get stream;
+  Stream<List<int>> get stream => _dataController.stream.map((data) => data);
 
   /// 读取一个字节
-  Future<int> readByte();
+  Future<int> readByte() async {
+    final bytes = await readBytes(1);
+    return bytes.isNotEmpty ? bytes[0] : -1;
+  }
 
   /// 读取指定长度的字节
-  Future<Uint8List> readBytes(int length);
+  Future<Uint8List> readBytes(int length) async {
+    final completer = Completer<Uint8List>();
+    final buffer = <int>[];
+
+    StreamSubscription<Uint8List>? subscription;
+    subscription = _dataController.stream.listen((data) {
+      buffer.addAll(data);
+      if (buffer.length >= length) {
+        subscription?.cancel();
+        completer.complete(Uint8List.fromList(buffer.sublist(0, length)));
+      }
+    });
+
+    return completer.future;
+  }
 
   /// 从流中读取指定数量的字节
-  Future<List<int>> take(int count);
+  Future<List<int>> take(int count) async {
+    final bytes = await readBytes(count);
+    return bytes.toList();
+  }
 
   /// 转换流数据
-  Stream<S> transform<S>(StreamTransformer<List<int>, S> transformer);
+  Stream<S> transform<S>(StreamTransformer<List<int>, S> transformer) {
+    return stream.transform(transformer);
+  }
 
   /// 关闭数据源
-  Future<void> close();
+  Future<void> close() async {
+    _dataController.close();
+    await _closeCompleter.future;
+  }
 }
 
-/// ADB流数据接收器接口，定义了流数据的写入操作
-abstract class AdbStreamSink {
+/// ADB流数据接收器，提供流数据的写入操作
+class AdbStreamSink {
+  final AdbStream _stream;
+
+  AdbStreamSink(this._stream);
+
   /// 写入一个字节
-  Future<void> writeByte(int byte);
+  Future<void> writeByte(int byte) async {
+    await writeBytes([byte]);
+  }
 
   /// 写入字节数据
-  Future<void> writeBytes(List<int> bytes);
+  Future<void> writeBytes(List<int> bytes) async {
+    if (bytes.isEmpty) return;
+    await _stream.write(Uint8List.fromList(bytes));
+  }
 
   /// 向流中写入数据
-  Future<void> add(List<int> data);
+  Future<void> add(List<int> data) async {
+    await writeBytes(data);
+  }
 
   /// 添加流数据
-  Future<void> addStream(Stream<List<int>> stream);
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await for (final data in stream) {
+      await add(data);
+    }
+  }
 
   /// 刷新缓冲区
-  Future<void> flush();
+  Future<void> flush() async {
+    // ADB流写入是同步的，无需特殊刷新操作
+  }
 
   /// 关闭接收器
-  Future<void> close();
+  Future<void> close() async {
+    await _stream.close();
+  }
 }
 
 /// ADB流类，负责ADB协议的流管理和数据传输
@@ -86,10 +147,10 @@ class AdbStream {
   Stream<void> get closeStream => _closeController.stream;
 
   /// 获取数据源
-  AdbStreamSource get source => AdbStreamSourceImpl(this);
+  AdbStreamSource get source => AdbStreamSource(this);
 
   /// 获取数据接收器
-  AdbStreamSink get sink => AdbStreamSinkImpl(this);
+  AdbStreamSink get sink => AdbStreamSink(this);
 
   Future<void> waitForRemoteId() => _remoteIdCompleter.future;
   int get remoteId => _remoteId;
@@ -224,108 +285,5 @@ class AdbStream {
       chunks.add(data.sublist(offset, offset + actualChunkSize));
     }
     return chunks;
-  }
-}
-
-/// ADB流数据源实现
-class AdbStreamSourceImpl implements AdbStreamSource {
-  final AdbStream _stream;
-  final StreamController<Uint8List> _dataController =
-      StreamController<Uint8List>();
-  final Completer<void> _closeCompleter = Completer<void>();
-
-  AdbStreamSourceImpl(this._stream) {
-    _stream.dataStream.listen(
-      (data) {
-        _dataController.add(data);
-      },
-      onDone: () {
-        _dataController.close();
-        _closeCompleter.complete();
-      },
-    );
-  }
-
-  @override
-  Stream<List<int>> get stream => _dataController.stream.map((data) => data);
-
-  @override
-  Future<int> readByte() async {
-    final bytes = await readBytes(1);
-    return bytes.isNotEmpty ? bytes[0] : -1;
-  }
-
-  @override
-  Future<Uint8List> readBytes(int length) async {
-    final completer = Completer<Uint8List>();
-    final buffer = <int>[];
-
-    StreamSubscription<Uint8List>? subscription;
-    subscription = _dataController.stream.listen((data) {
-      buffer.addAll(data);
-      if (buffer.length >= length) {
-        subscription?.cancel();
-        completer.complete(Uint8List.fromList(buffer.sublist(0, length)));
-      }
-    });
-
-    return completer.future;
-  }
-
-  @override
-  Future<List<int>> take(int count) async {
-    final bytes = await readBytes(count);
-    return bytes.toList();
-  }
-
-  @override
-  Stream<S> transform<S>(StreamTransformer<List<int>, S> transformer) {
-    return stream.transform(transformer);
-  }
-
-  @override
-  Future<void> close() async {
-    _dataController.close();
-    await _closeCompleter.future;
-  }
-}
-
-/// ADB流数据接收器实现
-class AdbStreamSinkImpl implements AdbStreamSink {
-  final AdbStream _stream;
-
-  AdbStreamSinkImpl(this._stream);
-
-  @override
-  Future<void> writeByte(int byte) async {
-    await writeBytes([byte]);
-  }
-
-  @override
-  Future<void> writeBytes(List<int> bytes) async {
-    if (bytes.isEmpty) return;
-    await _stream.write(Uint8List.fromList(bytes));
-  }
-
-  @override
-  Future<void> add(List<int> data) async {
-    await writeBytes(data);
-  }
-
-  @override
-  Future<void> addStream(Stream<List<int>> stream) async {
-    await for (final data in stream) {
-      await add(data);
-    }
-  }
-
-  @override
-  Future<void> flush() async {
-    // ADB流写入是同步的，无需特殊刷新操作
-  }
-
-  @override
-  Future<void> close() async {
-    await _stream.close();
   }
 }

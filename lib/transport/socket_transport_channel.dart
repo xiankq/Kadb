@@ -187,7 +187,6 @@ class SocketTransportChannel implements TransportChannel {
     }
   }
 
-  @override
   bool get isConnected => _isConnected;
 
   @override

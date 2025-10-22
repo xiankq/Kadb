@@ -13,7 +13,7 @@ export 'stream/adb_stream.dart';
 export 'stream/adb_shell_stream.dart';
 export 'shell/adb_shell_response.dart';
 export 'stream/adb_sync_stream.dart';
-export 'forwarding/tcp_forwarder.dart';
+export 'forwarding/forwarding_manager.dart';
 export 'pair/pairing_connection_ctx.dart';
 
 import 'dart:async';
@@ -25,7 +25,7 @@ import 'stream/adb_shell_stream.dart';
 import 'shell/adb_shell_response.dart';
 import 'stream/adb_sync_stream.dart';
 import 'stream/adb_stream.dart';
-import 'forwarding/tcp_forwarder.dart';
+import 'forwarding/forwarding_manager.dart';
 
 /// ADB客户端主类
 class KadbDart {
@@ -82,44 +82,23 @@ class KadbDart {
     return AdbSyncStream.open(connection);
   }
 
-  /// 创建TCP转发器
-  static TcpForwarder createTcpForwarder(
-    AdbConnection connection,
-    int hostPort,
-    String destination,
-  ) {
-    return TcpForwarder(connection, hostPort, destination);
-  }
-
-  /// 创建反向TCP转发器
-  static ReverseTcpForwarder createReverseTcpForwarder(
-    AdbConnection connection,
-    int devicePort,
-    int hostPort,
-  ) {
-    return ReverseTcpForwarder(connection, devicePort, hostPort);
+  /// 创建转发管理器
+  static ForwardingManager createForwardingManager(
+    AdbConnection connection, {
+    bool debug = false,
+  }) {
+    return ForwardingManager(connection, debug: debug);
   }
 
   /// 启动TCP端口转发
   static Future<TcpForwarder> startTcpForward(
     AdbConnection connection,
     int hostPort,
-    String destination,
-  ) async {
-    final forwarder = TcpForwarder(connection, hostPort, destination);
-    await forwarder.start();
-    return forwarder;
-  }
-
-  /// 启动反向TCP端口转发
-  static Future<ReverseTcpForwarder> startReverseTcpForward(
-    AdbConnection connection,
-    int devicePort,
-    int hostPort,
-  ) async {
-    final forwarder = ReverseTcpForwarder(connection, devicePort, hostPort);
-    await forwarder.start();
-    return forwarder;
+    String destination, {
+    bool debug = false,
+  }) async {
+    final manager = ForwardingManager(connection, debug: debug);
+    return await manager.startForwarding(hostPort, destination);
   }
 
   /// 尝试连接

@@ -5,25 +5,15 @@ import 'dart:typed_data';
 /// 传输通道接口，抽象网络连接，支持同步和异步IO操作
 abstract class TransportChannel {
   /// 从通道读取数据到缓冲区
-  /// [dst] 目标缓冲区
-  /// [timeout] 超时时间
-  /// 返回读取的字节数
   Future<int> read(Uint8List dst, Duration timeout);
 
   /// 从缓冲区写入数据到通道
-  /// [src] 源缓冲区
-  /// [timeout] 超时时间
-  /// 返回写入的字节数
   Future<int> write(Uint8List src, Duration timeout);
 
   /// 完全读取指定长度的数据
-  /// [dst] 目标缓冲区
-  /// [timeout] 超时时间
   Future<void> readExactly(Uint8List dst, Duration timeout);
 
   /// 完全写入缓冲区数据
-  /// [src] 源缓冲区
-  /// [timeout] 超时时间
   Future<void> writeExactly(Uint8List src, Duration timeout);
 
   /// 关闭输入流
