@@ -54,7 +54,6 @@ class ConnectionProvider with ChangeNotifier {
       _isConnected = true;
       notifyListeners();
       return true;
-
     } catch (e, stackTrace) {
       debugPrint('连接失败: $e');
       debugPrint('错误堆栈: $stackTrace');
@@ -68,7 +67,6 @@ class ConnectionProvider with ChangeNotifier {
     }
   }
 
-  
   Future<void> disconnect() async {
     try {
       _connection?.close();
