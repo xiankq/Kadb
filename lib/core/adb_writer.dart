@@ -21,7 +21,7 @@ class AdbWriter {
   }) {
     final payload = utf8.encode(systemIdentityString);
     return write(
-      AdbProtocol.CMD_CNXN,
+      AdbProtocol.cmdCnxn,
       version,
       maxData,
       payload,
@@ -33,7 +33,7 @@ class AdbWriter {
   /// 写入认证消息
   Future<void> writeAuth(int authType, List<int> authPayload) {
     return write(
-      AdbProtocol.CMD_AUTH,
+      AdbProtocol.cmdAuth,
       authType,
       0,
       authPayload,
@@ -44,14 +44,14 @@ class AdbWriter {
 
   /// 写入STLS消息
   Future<void> writeStls(int version) {
-    return write(AdbProtocol.CMD_STLS, version, 0, null, 0, 0);
+    return write(AdbProtocol.cmdStls, version, 0, null, 0, 0);
   }
 
   /// 写入打开流消息
   Future<void> writeOpen(int localId, String destination) {
     final destinationBytes = utf8.encode(destination);
     final payload = List<int>.from(destinationBytes)..add(0);
-    return write(AdbProtocol.CMD_OPEN, localId, 0, payload, 0, payload.length);
+    return write(AdbProtocol.cmdOpen, localId, 0, payload, 0, payload.length);
   }
 
   /// 写入数据消息
@@ -63,7 +63,7 @@ class AdbWriter {
     int length,
   ) {
     return write(
-      AdbProtocol.CMD_WRTE,
+      AdbProtocol.cmdWrte,
       localId,
       remoteId,
       payload,
@@ -74,12 +74,12 @@ class AdbWriter {
 
   /// 写入关闭流消息
   Future<void> writeClose(int localId, int remoteId) {
-    return write(AdbProtocol.CMD_CLSE, localId, remoteId, null, 0, 0);
+    return write(AdbProtocol.cmdClse, localId, remoteId, null, 0, 0);
   }
 
   /// 写入确认消息
   Future<void> writeOkay(int localId, int remoteId) {
-    return write(AdbProtocol.CMD_OKAY, localId, remoteId, null, 0, 0);
+    return write(AdbProtocol.cmdOkay, localId, remoteId, null, 0, 0);
   }
 
   /// 写入通用ADB消息

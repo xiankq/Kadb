@@ -170,8 +170,7 @@ class AndroidPubkey {
       throw ArgumentError('不支持的模数大小: $modulusSizeWords');
     }
 
-    // 读取n0inv
-    final n0inv = buffer.getUint32(offset, Endian.little);
+    // 读取n0inv（虽然计算但未使用）
     offset += 4;
 
     // 读取模数

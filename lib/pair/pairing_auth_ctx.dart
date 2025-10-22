@@ -44,8 +44,8 @@ class Spake2ContextImpl implements Spake2Context {
   final Uint8List _theirName;
   late Uint8List _privateKey;
   late Uint8List _publicKey;
-  late Uint8List _M;
-  late Uint8List _N;
+  late Uint8List _m;
+  late Uint8List _n;
   late Uint8List _scalar;
   bool _destroyed = false;
   
@@ -67,8 +67,8 @@ class Spake2ContextImpl implements Spake2Context {
     _publicKey = _computePublicKey(_privateKey);
     
     // 设置SPAKE2参数M和N（与Kotlin版本一致）
-    _M = _hexToBytes('d048032c6ea0b6d697ddc2d86c7d82252b33de61e6b028dbbf6a6a2c6f9f8e1');
-    _N = _hexToBytes('d048032c6ea0b6d697ddc2d86c7d82252b33de61e6b028dbbf6a6a2c6f9f8e2');
+    _m = _hexToBytes('d048032c6ea0b6d697ddc2d86c7d82252b33de61e6b028dbbf6a6a2c6f9f8e1');
+    _n = _hexToBytes('d048032c6ea0b6d697ddc2d86c7d82252b33de61e6b028dbbf6a6a2c6f9f8e2');
   }
   
   @override
@@ -82,7 +82,7 @@ class Spake2ContextImpl implements Spake2Context {
     final w = _reduceModQ(passwordHash);
     
     // 计算X = w * M + X0（对于Alice）或Y = w * N + Y0（对于Bob）
-    final basePoint = _role == Spake2Role.alice ? _M : _N;
+    final basePoint = _role == Spake2Role.alice ? _m : _n;
     final combinedPoint = _pointAdd(_pointMultiply(basePoint, w), _publicKey);
     
     _scalar = combinedPoint;

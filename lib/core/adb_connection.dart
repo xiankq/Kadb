@@ -113,13 +113,13 @@ class AdbConnection {
             Logging.error('TLS升级功能暂未实现');
             throw UnsupportedError('TLS升级功能暂未实现');
 
-          case AdbProtocol.CMD_AUTH:
+          case AdbProtocol.cmdAuth:
             // 直接处理认证流程
             Logging.status('开始认证流程...');
             await _performAuthentication(message, systemIdentity);
             return;
 
-          case AdbProtocol.CMD_CNXN:
+          case AdbProtocol.cmdCnxn:
             // 直接连接成功，无需认证
             Logging.status('连接成功，无需认证');
             return;
@@ -140,17 +140,17 @@ class AdbConnection {
     switch (command) {
       case AdbProtocol.cmdStls:
         return 'STLS(TLS升级)';
-      case AdbProtocol.CMD_AUTH:
+      case AdbProtocol.cmdAuth:
         return 'AUTH(认证请求)';
-      case AdbProtocol.CMD_CNXN:
+      case AdbProtocol.cmdCnxn:
         return 'CNXN(连接确认)';
-      case AdbProtocol.CMD_OPEN:
+      case AdbProtocol.cmdOpen:
         return 'OPEN(打开流)';
-      case AdbProtocol.CMD_OKAY:
+      case AdbProtocol.cmdOkay:
         return 'OKAY(确认)';
-      case AdbProtocol.CMD_WRTE:
+      case AdbProtocol.cmdWrte:
         return 'WRTE(写入数据)';
-      case AdbProtocol.CMD_CLSE:
+      case AdbProtocol.cmdClse:
         return 'CLSE(关闭流)';
       default:
         return 'UNKNOWN(0x${command.toRadixString(16)})';
@@ -195,7 +195,7 @@ class AdbConnection {
     // 等待设备响应
     final responseMessage = await _messageQueue.next();
 
-    if (responseMessage.command == AdbProtocol.CMD_CNXN) {
+    if (responseMessage.command == AdbProtocol.cmdCnxn) {
       if (_debug) {
         print('ADB认证: 签名认证成功');
       }
@@ -225,7 +225,7 @@ class AdbConnection {
     // 等待最终认证结果
     final finalMessage = await _messageQueue.next();
 
-    if (finalMessage.command == AdbProtocol.CMD_CNXN) {
+    if (finalMessage.command == AdbProtocol.cmdCnxn) {
       Logging.status('公钥认证成功');
       return;
     }

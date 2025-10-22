@@ -33,13 +33,13 @@ class AdbMessage {
     if (payloadLength == 0) return '';
 
     switch (command) {
-      case AdbProtocol.CMD_AUTH:
-        if (arg0 == AdbProtocol.AUTH_TYPE_RSA_PUBLIC) {
+      case AdbProtocol.cmdAuth:
+        if (arg0 == AdbProtocol.authTypeRsaPublic) {
           return utf8.decode(payload);
         }
         return 'auth[$payloadLength]';
 
-      case AdbProtocol.CMD_WRTE:
+      case AdbProtocol.cmdWrte:
         final shellPayload = _shellPayloadStr();
         if (shellPayload != null) return shellPayload;
 
@@ -48,7 +48,7 @@ class AdbMessage {
 
         return 'payload[$payloadLength]';
 
-      case AdbProtocol.CMD_OPEN:
+      case AdbProtocol.cmdOpen:
         try {
           return utf8.decode(payload.sublist(0, payloadLength - 1));
         } catch (e) {
@@ -118,17 +118,17 @@ class AdbMessage {
 
   String _commandStr() {
     switch (command) {
-      case AdbProtocol.CMD_AUTH:
+      case AdbProtocol.cmdAuth:
         return 'AUTH';
-      case AdbProtocol.CMD_CNXN:
+      case AdbProtocol.cmdCnxn:
         return 'CNXN';
-      case AdbProtocol.CMD_OPEN:
+      case AdbProtocol.cmdOpen:
         return 'OPEN';
-      case AdbProtocol.CMD_OKAY:
+      case AdbProtocol.cmdOkay:
         return 'OKAY';
-      case AdbProtocol.CMD_CLSE:
+      case AdbProtocol.cmdClse:
         return 'CLSE';
-      case AdbProtocol.CMD_WRTE:
+      case AdbProtocol.cmdWrte:
         return 'WRTE';
       default:
         return '????';

@@ -153,13 +153,11 @@ class AdbSyncStream {
     }
 
     // 分块发送数据
-    int chunkCount = 0;
     for (int i = 0; i < allData.length; i += chunkSize) {
       final end = (i + chunkSize < allData.length)
           ? i + chunkSize
           : allData.length;
       final chunk = allData.sublist(i, end);
-      chunkCount++;
 
       await _writePacket(AdbSyncStreamConstants.data, chunk.length);
       await _stream.sink.writeBytes(chunk);

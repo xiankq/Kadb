@@ -475,7 +475,6 @@ class _SimpleRSAPrivateKey implements RSAPrivateKey {
 
   BigInt get privateExponentFactorQ => privateExponent % (q - BigInt.one);
 
-  @override
   BigInt get qInv => q.modInverse(p);
 
   @override

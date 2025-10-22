@@ -17,7 +17,7 @@ class AdbReader {
   /// 返回解析后的AdbMessage对象
   Future<AdbMessage> readMessage() async {
     // 读取消息头（24字节）- 阻塞等待完整数据
-    final headerBytes = await _readBytesExact(AdbProtocol.ADB_HEADER_LENGTH);
+    final headerBytes = await _readBytesExact(AdbProtocol.headerLength);
 
     // 解析消息头
     final command = ByteUtils.readIntLe(headerBytes, 0);
