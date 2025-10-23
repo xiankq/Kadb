@@ -13,7 +13,7 @@ Kadb is a library that enables connecting to Android devices without requiring t
   - Core implementation in `lib/kadb_dart.dart` and supporting modules
 - `example/` - Flutter scrcpy application demonstrating kadb_dart usage
   - Complete Flutter app with Android/iOS support
-  - Uses media_kit for video playback
+  - Uses fvp and video_player for video playback
   - Includes local kadb_dart dependency
 - `example-dartonly/` - Pure Dart example files (moved from root example/)
 - `test/` - Dart test files for the kadb_dart package
@@ -35,6 +35,7 @@ dart analyze
 
 # Run Dart-only examples
 dart run example-dartonly/scrcpy_server.dart
+dart run example-dartonly/scrcpy_server_parsing.dart
 dart run example-dartonly/device_info_example.dart
 ```
 
@@ -130,10 +131,10 @@ dart test --coverage
 - `path: ^1.9.0` - Path manipulation utilities
 
 **Flutter Example App:**
-- `media_kit: ^1.2.1` - Video playback for scrcpy streaming
-- `media_kit_video: ^1.2.1` - Video widget support
-- `media_kit_libs_video: ^1.0.7` - Native video libraries
+- `fvp: ^0.35.0` - FVP video player for TCP streaming
+- `video_player: ^2.10.0` - Standard video player
 - `path_provider: ^2.1.1` - File system access
+- `provider: ^6.1.1` - State management
 - `kadb_dart` (local dependency) - Core ADB functionality
 
 ## Testing
@@ -142,3 +143,6 @@ dart test --coverage
 - **Flutter Tests**: Widget and integration tests in `example/test/`
 - **Manual Testing**: Use Flutter example app for end-to-end testing with real devices
 - **Test Coverage**: Run `dart test --coverage` for coverage reports
+
+## RULES
+请始终使用中文进行交流
