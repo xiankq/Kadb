@@ -17,7 +17,7 @@ void main() async {
 
   try {
     // 1. 连接设备
-    print('正在连接到设备 192.168.2.32:5555...');
+    print('正在连接到设备 192.168.2.32:5556...');
     final keyPair = await CertUtils.loadKeyPair();
 
     connection = await KadbDart.create(

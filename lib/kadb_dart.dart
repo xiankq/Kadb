@@ -14,12 +14,10 @@ export 'src/stream/adb_shell_stream.dart';
 export 'src/shell/adb_shell_response.dart';
 export 'src/stream/adb_sync_stream.dart';
 export 'src/forward/tcp_forwarder.dart';
-export 'src/forward/direct_forwarder.dart';
 export 'src/security/pairing_connection_ctx.dart';
 
 import 'dart:async';
 import 'dart:io';
-import 'package:kadb_dart/src/forward/direct_forwarder.dart';
 
 import 'src/core/adb_connection.dart';
 import 'src/security/adb_key_pair.dart';
@@ -80,18 +78,6 @@ class KadbDart {
       debug: debug,
     );
     await forwarder.start();
-    return forwarder;
-  }
-
-  /// 类似Tcp转发，但不启动端口监听
-  static Future<DirectForwarder> directForward(
-    AdbConnection connection,
-    int hostPort,
-    String destination, {
-    bool debug = false,
-  }) async {
-    final forwarder = DirectForwarder(connection, destination, debug: debug);
-    await forwarder.connect();
     return forwarder;
   }
 
