@@ -1,0 +1,16 @@
+name: adb_dart
+description: 纯Dart实现的ADB客户端库，基于Kadb项目移植
+version: 1.0.0
+# repository: https://github.com/my_org/my_repo
+
+environment:
+  sdk: ^3.9.2
+
+# Add regular dependencies here.
+dependencies:
+  path: ^1.9.0
+  pointycastle: ^3.7.3
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6
