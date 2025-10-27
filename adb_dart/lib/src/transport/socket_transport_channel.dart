@@ -13,12 +13,23 @@ class SocketTransportChannel implements TransportChannel {
   final Socket _socket;
   final StreamController<Uint8List> _inputController =
       StreamController<Uint8List>();
+  final Completer<void> _closeCompleter = Completer<void>();
 
   Duration? _readTimeout;
   Duration? _writeTimeout;
 
   SocketTransportChannel(this._socket) {
     _setupSocketListeners();
+    // 监听socket关闭事件
+    _socket.done.then((_) {
+      if (!_closeCompleter.isCompleted) {
+        _closeCompleter.complete();
+      }
+    }).catchError((error) {
+      if (!_closeCompleter.isCompleted) {
+        _closeCompleter.completeError(error);
+      }
+    });
   }
 
   /// 设置Socket监听器
@@ -54,27 +65,55 @@ class SocketTransportChannel implements TransportChannel {
     try {
       final completer = Completer<Uint8List>();
       final buffer = BytesBuilder();
+      DateTime? startTime;
+      
+      if (_readTimeout != null) {
+        startTime = DateTime.now();
+      }
 
       StreamSubscription<Uint8List>? subscription;
       subscription = _inputController.stream.listen(
         (data) {
-          buffer.add(data);
-          if (buffer.length >= maxSize) {
+          try {
+            buffer.add(data);
+            print('读取数据块: ${data.length} 字节，缓冲区: ${buffer.length} 字节');
+            
+            if (buffer.length >= maxSize) {
+              subscription?.cancel();
+              final result = buffer.toBytes().sublist(0, maxSize);
+              print('读取完成，返回 ${result.length} 字节');
+              completer.complete(result);
+            }
+            
+            // 检查超时
+            if (_readTimeout != null && startTime != null) {
+              final elapsed = DateTime.now().difference(startTime);
+              if (elapsed > _readTimeout!) {
+                subscription?.cancel();
+                completer.completeError(
+                  TransportException('Read timeout after ${elapsed.inMilliseconds}ms'),
+                );
+              }
+            }
+          } catch (e) {
             subscription?.cancel();
-            completer.complete(buffer.toBytes().sublist(0, maxSize));
+            completer.completeError(TransportException('Read processing error', e));
           }
         },
         onError: (error) {
           subscription?.cancel();
-          completer.completeError(TransportException('Read error', error));
+          print('读取流错误: $error');
+          completer.completeError(TransportException('Read stream error', error));
         },
         onDone: () {
           subscription?.cancel();
           if (!completer.isCompleted) {
             final result = buffer.toBytes();
             if (result.isNotEmpty) {
+              print('流结束，返回剩余 ${result.length} 字节');
               completer.complete(result);
             } else {
+              print('流结束且无数据');
               completer.completeError(
                 TransportException('Stream closed before reading complete'),
               );
@@ -83,14 +122,24 @@ class SocketTransportChannel implements TransportChannel {
         },
       );
 
+      // 设置超时处理
       if (_readTimeout != null) {
-        return await completer.future.timeout(_readTimeout!);
+        return await completer.future.timeout(
+          _readTimeout!,
+          onTimeout: () {
+            subscription?.cancel();
+            throw TransportException('Read operation timed out after ${_readTimeout!.inMilliseconds}ms');
+          },
+        );
       } else {
         return await completer.future;
       }
+    } on TimeoutException {
+      throw TransportException('Read timeout');
     } catch (e) {
       if (e is TransportException) rethrow;
-      throw TransportException('Read failed', e);
+      print('读取操作失败: $e');
+      throw TransportException('Read operation failed', e);
     }
   }
 
@@ -100,15 +149,42 @@ class SocketTransportChannel implements TransportChannel {
       throw TransportException('Transport channel is closed');
     }
 
+    if (data.isEmpty) {
+      return 0;
+    }
+
     try {
-      _socket.add(data);
-      if (_writeTimeout != null) {
-        await _socket.flush().timeout(_writeTimeout!);
-      } else {
-        await _socket.flush();
+      print('写入数据: ${data.length} 字节');
+      
+      // 分块写入大数据
+      const maxChunkSize = 65536; // 64KB
+      int totalWritten = 0;
+      
+      for (int offset = 0; offset < data.length; offset += maxChunkSize) {
+        final chunkSize = (offset + maxChunkSize <= data.length) 
+            ? maxChunkSize 
+            : data.length - offset;
+        final chunk = data.sublist(offset, offset + chunkSize);
+        
+        _socket.add(chunk);
+        totalWritten += chunkSize;
+        
+        print('写入数据块: $chunkSize 字节，总计: $totalWritten 字节');
+        
+        // 刷新并等待确认
+        if (_writeTimeout != null) {
+          await _socket.flush().timeout(_writeTimeout!);
+        } else {
+          await _socket.flush();
+        }
       }
-      return data.length;
+      
+      print('数据写入完成: $totalWritten 字节');
+      return totalWritten;
+    } on TimeoutException {
+      throw TransportException('Write timeout after ${_writeTimeout?.inMilliseconds ?? 0}ms');
     } catch (e) {
+      print('写入失败: $e');
       throw TransportException('Write failed', e);
     }
   }
@@ -116,8 +192,10 @@ class SocketTransportChannel implements TransportChannel {
   @override
   bool get isOpen {
     try {
-      // 简单的状态检查 - 检查socket地址是否可用
-      return _socket.address != null;
+      // 更全面的状态检查 - 使用Completer来判断连接状态
+      return !_closeCompleter.isCompleted && 
+             _socket.address != null && 
+             !_inputController.isClosed;
     } catch (e) {
       return false;
     }

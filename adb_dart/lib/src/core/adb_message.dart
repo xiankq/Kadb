@@ -114,10 +114,41 @@ class AdbMessage {
   }
 
   String writePayloadStr() {
-    // TODO: 实现shell和sync载荷解析
-    // 这里需要实现类似Kadb中的shellPayloadStr和syncPayloadStr逻辑
-    // 暂时返回简单的载荷信息
-    return 'payload[$payloadLength]';
+    return shellPayloadStr() ?? syncPayloadStr() ?? 'payload[$payloadLength]';
+  }
+
+  String? shellPayloadStr() {
+    if (payloadLength < 5) return null;
+    
+    final buffer = ByteData.sublistView(payload, 0, 5);
+    final id = buffer.getUint8(0);
+    final length = buffer.getUint32(1, Endian.little);
+    
+    if (id < 0 || id > 3) return null;
+    if (length != payloadLength - 5) return null;
+    
+    if (id == 3) { // AdbShellPacketV2.ID_EXIT
+      if (payloadLength == 6) {
+        final exitCode = payload[5];
+        return '[shell] exit($exitCode)';
+      }
+    }
+    
+    final payloadStr = String.fromCharCodes(payload, 5, payloadLength);
+    return '[shell] $payloadStr';
+  }
+
+  String? syncPayloadStr() {
+    if (payloadLength < 8) return null;
+    
+    final buffer = ByteData.sublistView(payload, 0, 8);
+    final id = String.fromCharCodes(payload, 0, 4);
+    final arg = buffer.getUint32(4, Endian.little);
+    
+    const syncIds = {'STAT', 'LIST', 'SEND', 'RECV', 'DENT', 'DATA', 'DONE', 'OKAY', 'FAIL'};
+    if (!syncIds.contains(id)) return null;
+    
+    return '[sync] $id($arg)';
   }
 
   /// 验证消息的magic值

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:typed_data';
 
 /// ADB连接异常
 class AdbConnectionException implements Exception {
@@ -7,19 +8,70 @@ class AdbConnectionException implements Exception {
   final dynamic cause;
   final String? host;
   final int? port;
+  final int? errorCode;
 
-  AdbConnectionException(this.message, [this.cause, this.host, this.port]);
+  AdbConnectionException(
+    this.message, [
+    this.cause,
+    this.host,
+    this.port,
+    this.errorCode,
+  ]);
 
   @override
   String toString() {
     final buffer = StringBuffer('AdbConnectionException: $message');
     if (cause != null) {
-      buffer.write(' (caused by: $cause)');
+      buffer.write('\n  Caused by: $cause');
     }
     if (host != null && port != null) {
-      buffer.write(' ($host:$port)');
+      buffer.write('\n  Connection: $host:$port');
+    }
+    if (errorCode != null) {
+      buffer.write('\n  Error code: $errorCode');
     }
     return buffer.toString();
+  }
+
+  /// 获取详细的错误信息
+  String get detailedMessage {
+    final buffer = StringBuffer();
+    buffer.writeln('ADB Connection Error: $message');
+    
+    if (cause != null) {
+      buffer.writeln('Root Cause: $cause');
+    }
+    
+    if (host != null && port != null) {
+      buffer.writeln('Target: $host:$port');
+    }
+    
+    if (errorCode != null) {
+      buffer.writeln('System Error Code: $errorCode');
+      buffer.writeln('Error Description: ${_getErrorDescription(errorCode!)}');
+    }
+    
+    return buffer.toString();
+  }
+
+  String _getErrorDescription(int code) {
+    switch (code) {
+      case 61: return 'Connection refused';
+      case 64: return 'Host is down';
+      case 65: return 'No route to host';
+      case 104: return 'Connection reset by peer';
+      case 111: return 'Connection refused';
+      case 113: return 'No route to host';
+      case 110: return 'Connection timed out';
+      case 115: return 'Operation in progress';
+      default: return 'Unknown error';
+    }
+  }
+
+  /// 检查是否为可恢复的错误
+  bool get isRecoverable {
+    if (errorCode == null) return false;
+    return const [61, 64, 65, 104, 111, 113].contains(errorCode);
   }
 }
 
@@ -51,6 +103,7 @@ class AdbProtocolException implements Exception {
   final int? command;
   final int? arg0;
   final int? arg1;
+  final Uint8List? payload;
 
   AdbProtocolException(
     this.message, [
@@ -58,24 +111,60 @@ class AdbProtocolException implements Exception {
     this.command,
     this.arg0,
     this.arg1,
+    this.payload,
   ]);
 
   @override
   String toString() {
     final buffer = StringBuffer('AdbProtocolException: $message');
     if (cause != null) {
-      buffer.write(' (caused by: $cause)');
+      buffer.write('\n  Caused by: $cause');
     }
     if (command != null) {
-      buffer.write(' (command: 0x${command!.toRadixString(16)})');
+      buffer.write('\n  Command: 0x${command!.toRadixString(16)} (${_getCommandName(command!)})');
     }
     if (arg0 != null) {
-      buffer.write(' (arg0: $arg0)');
+      buffer.write('\n  Arg0: $arg0 (0x${arg0!.toRadixString(16)})');
     }
     if (arg1 != null) {
-      buffer.write(' (arg1: $arg1)');
+      buffer.write('\n  Arg1: $arg1 (0x${arg1!.toRadixString(16)})');
+    }
+    if (payload != null && payload!.isNotEmpty) {
+      buffer.write('\n  Payload: ${payload!.length} bytes');
+      if (payload!.length <= 64) {
+        buffer.write(' (hex: ${_bytesToHex(payload!)})');
+      }
     }
     return buffer.toString();
+  }
+
+  String _getCommandName(int cmd) {
+    const commands = {
+      0x48545541: 'AUTH',
+      0x4e584e43: 'CNXN',
+      0x4e45504f: 'OPEN',
+      0x59414b4f: 'OKAY',
+      0x45534c43: 'CLSE',
+      0x45545257: 'WRTE',
+      0x534c5453: 'STLS',
+    };
+    return commands[cmd] ?? 'UNKNOWN';
+  }
+
+  String _bytesToHex(Uint8List bytes) {
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+  }
+
+  /// 获取协议错误类型
+  String get errorType {
+    if (command == 0x48545541) return 'Authentication Error';
+    if (command == 0x4e584e43) return 'Connection Error';
+    if (command == 0x4e45504f) return 'Stream Open Error';
+    if (command == 0x59414b4f) return 'Stream Acknowledgment Error';
+    if (command == 0x45534c43) return 'Stream Close Error';
+    if (command == 0x45545257) return 'Data Write Error';
+    if (command == 0x534c5453) return 'TLS Error';
+    return 'Protocol Error';
   }
 }
 
@@ -227,16 +316,37 @@ class AdbForwardException implements Exception {
 class AdbTimeoutException implements Exception {
   final String message;
   final Duration? timeout;
+  final String? operation;
 
-  AdbTimeoutException(this.message, [this.timeout]);
+  AdbTimeoutException(
+    this.message, [
+    this.timeout,
+    this.operation,
+  ]);
 
   @override
   String toString() {
     final buffer = StringBuffer('AdbTimeoutException: $message');
+    if (operation != null) {
+      buffer.write('\n  Operation: $operation');
+    }
     if (timeout != null) {
-      buffer.write(' (timeout: ${timeout!.inMilliseconds}ms)');
+      buffer.write('\n  Timeout: ${timeout!.inMilliseconds}ms');
     }
     return buffer.toString();
+  }
+
+  /// 获取超时建议
+  String get timeoutSuggestion {
+    if (timeout == null) return '请检查网络连接和设备状态';
+    
+    if (timeout!.inMilliseconds < 5000) {
+      return '当前超时时间较短(${timeout!.inMilliseconds}ms)，建议增加到10秒以上';
+    } else if (timeout!.inMilliseconds > 60000) {
+      return '当前超时时间较长(${timeout!.inMilliseconds}ms)，建议检查网络连接';
+    }
+    
+    return '请检查网络连接、设备状态和服务端配置';
   }
 }
 

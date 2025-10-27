@@ -8,6 +8,8 @@ import 'transport_channel.dart';
 class TlsTransportChannel implements TransportChannel {
   final SecureSocket _secureSocket;
   final Completer<void> _closeCompleter = Completer<void>();
+  Duration? _readTimeout;
+  Duration? _writeTimeout;
 
   TlsTransportChannel(this._secureSocket) {
     _secureSocket.done
@@ -35,38 +37,107 @@ class TlsTransportChannel implements TransportChannel {
 
   @override
   Future<int> write(Uint8List data) async {
+    if (!isOpen) {
+      throw TransportException('TLS transport channel is closed');
+    }
+
+    if (data.isEmpty) {
+      return 0;
+    }
+
     try {
-      _secureSocket.add(data);
-      await _secureSocket.flush();
-      return data.length;
+      print('TLS写入数据: ${data.length} 字节');
+      
+      // 分块写入大数据
+      const maxChunkSize = 65536; // 64KB
+      int totalWritten = 0;
+      
+      for (int offset = 0; offset < data.length; offset += maxChunkSize) {
+        final chunkSize = (offset + maxChunkSize <= data.length) 
+            ? maxChunkSize 
+            : data.length - offset;
+        final chunk = data.sublist(offset, offset + chunkSize);
+        
+        _secureSocket.add(chunk);
+        totalWritten += chunkSize;
+        
+        print('TLS写入数据块: $chunkSize 字节，总计: $totalWritten 字节');
+        await _secureSocket.flush();
+      }
+      
+      print('TLS数据写入完成: $totalWritten 字节');
+      return totalWritten;
     } catch (e) {
-      throw TransportException('TLS write failed: $e');
+      print('TLS写入失败: $e');
+      throw TransportException('TLS write failed', e);
     }
   }
 
   @override
   Future<Uint8List> read(int maxSize) async {
+    if (!isOpen) {
+      throw TransportException('TLS transport channel is closed');
+    }
+
     try {
-      // 从SecureSocket读取数据
-      final subscription = _secureSocket.listen((data) {});
-
-      // 等待数据可用
-      await for (final data in _secureSocket) {
-        if (data.isNotEmpty) {
-          subscription.cancel();
-
-          // 限制读取大小
-          if (data.length > maxSize) {
-            return data.sublist(0, maxSize);
+      print('TLS读取请求: 最大 $maxSize 字节');
+      
+      final completer = Completer<Uint8List>();
+      final buffer = BytesBuilder();
+      StreamSubscription<Uint8List>? subscription;
+      
+      subscription = _secureSocket.listen(
+        (data) {
+          if (data.isNotEmpty) {
+            buffer.add(data);
+            print('TLS接收到数据: ${data.length} 字节，缓冲区: ${buffer.length} 字节');
+            
+            if (buffer.length >= maxSize) {
+              subscription?.cancel();
+              final result = buffer.toBytes().sublist(0, maxSize);
+              print('TLS读取完成，返回 ${result.length} 字节');
+              completer.complete(result);
+            }
           }
-          return data;
-        }
-      }
+        },
+        onError: (error) {
+          subscription?.cancel();
+          print('TLS读取错误: $error');
+          completer.completeError(TransportException('TLS read error', error));
+        },
+        onDone: () {
+          subscription?.cancel();
+          if (!completer.isCompleted) {
+            final result = buffer.toBytes();
+            if (result.isNotEmpty) {
+              print('TLS流结束，返回剩余 ${result.length} 字节');
+              completer.complete(result);
+            } else {
+              print('TLS流结束且无数据');
+              completer.complete(Uint8List(0));
+            }
+          }
+        },
+      );
 
-      subscription.cancel();
-      return Uint8List(0);
+      // 设置读取超时
+      final readTimeout = _readTimeout;
+      if (readTimeout != null) {
+        return await completer.future.timeout(
+          readTimeout,
+          onTimeout: () {
+            subscription?.cancel();
+            throw TransportException('TLS read timeout after ${readTimeout.inMilliseconds}ms');
+          },
+        );
+      } else {
+        return await completer.future;
+      }
+    } on TimeoutException {
+      throw TransportException('TLS read timeout');
     } catch (e) {
-      throw TransportException('TLS read failed: $e');
+      print('TLS读取失败: $e');
+      throw TransportException('TLS read failed', e);
     }
   }
 
@@ -84,9 +155,9 @@ class TlsTransportChannel implements TransportChannel {
   bool get isOpen {
     try {
       if (_closeCompleter.isCompleted) return false;
-
-      // 简单的状态检查
-      return true;
+      
+      // 检查SecureSocket状态 - 使用Completer来判断
+      return true; // SecureSocket在Dart中没有直接的isOpen检查
     } catch (e) {
       return false;
     }
@@ -105,10 +176,20 @@ class TlsTransportChannel implements TransportChannel {
   int? get localPort => _secureSocket.port;
 
   @override
-  Duration get readTimeout => const Duration(seconds: 30);
+  Duration get readTimeout => _readTimeout ?? const Duration(seconds: 30);
 
   @override
-  Duration get writeTimeout => const Duration(seconds: 30);
+  Duration get writeTimeout => _writeTimeout ?? const Duration(seconds: 30);
+
+  @override
+  void setReadTimeout(Duration timeout) {
+    _readTimeout = timeout;
+  }
+
+  @override
+  void setWriteTimeout(Duration timeout) {
+    _writeTimeout = timeout;
+  }
 
   @override
   Stream<Uint8List> get dataStream {
@@ -123,6 +204,7 @@ class TlsTransportChannel implements TransportChannel {
     try {
       return _secureSocket.selectedProtocol;
     } catch (e) {
+      print('获取TLS协议版本失败: $e');
       return null;
     }
   }
@@ -132,6 +214,7 @@ class TlsTransportChannel implements TransportChannel {
     try {
       return _secureSocket.peerCertificate;
     } catch (e) {
+      print('获取对等证书失败: $e');
       return null;
     }
   }

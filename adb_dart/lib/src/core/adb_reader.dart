@@ -13,8 +13,10 @@ import 'adb_protocol.dart';
 class AdbReader {
   final TransportChannel _channel;
   final StreamController<AdbMessage> _messageController =
-      StreamController<AdbMessage>();
+      StreamController<AdbMessage>.broadcast(); // 使用广播流允许多个监听者
   final BytesBuilder _buffer = BytesBuilder();
+  bool _isReading = false;
+  StreamSubscription<Uint8List>? _dataSubscription;
 
   AdbReader(this._channel) {
     _startReading();
@@ -22,28 +24,36 @@ class AdbReader {
 
   /// 开始读取消息
   void _startReading() {
-    if (_messageController.hasListener) return; // 避免重复监听
+    if (_isReading) return; // 避免重复监听
     
-    _channel.dataStream.listen(
+    _isReading = true;
+    print('AdbReader开始监听数据流...');
+    
+    _dataSubscription = _channel.dataStream.listen(
       (data) {
         try {
+          print('AdbReader接收到数据: ${data.length} 字节');
           // 将数据添加到缓冲区
           _buffer.add(data);
           
           // 尝试解析完整的消息
           _tryParseMessages();
         } catch (e) {
+          print('AdbReader处理数据时出错: $e');
           if (!_messageController.isClosed) {
             _messageController.addError(e);
           }
         }
       },
       onError: (error) {
+        print('AdbReader数据流错误: $error');
         if (!_messageController.isClosed) {
           _messageController.addError(error);
         }
       },
       onDone: () {
+        print('AdbReader数据流结束');
+        _isReading = false;
         if (!_messageController.isClosed) {
           _messageController.close();
         }
@@ -104,15 +114,24 @@ class AdbReader {
     if (_messageController.isClosed) {
       throw StateError('Message controller is closed');
     }
-    print('等待消息流中的第一条消息...');
-    final message = await _messageController.stream.first;
-    print('成功读取消息: ${message.command.toRadixString(16)}');
-    return message;
+    
+    print('等待消息流中的下一条消息...');
+    try {
+      // 使用take(1)来获取单个消息，避免消耗整个流
+      final message = await _messageController.stream.take(1).first;
+      print('成功读取消息: ${message.command.toRadixString(16)}');
+      return message;
+    } catch (e) {
+      print('读取消息失败: $e');
+      rethrow;
+    }
   }
 
   /// 关闭读取器
   void close() {
     print('关闭AdbReader...');
+    _isReading = false;
+    _dataSubscription?.cancel();
     if (!_messageController.isClosed) {
       _messageController.close();
     }

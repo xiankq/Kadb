@@ -145,44 +145,60 @@ class AdbSyncStream {
     final fileMode = mode ?? SyncProtocol.defaultFileMode;
     final lastMod = lastModified ?? file.lastModifiedSync();
 
+    print('开始发送文件: ${file.path} -> $remotePath');
+
     // 构建SEND命令
     final sendPath = "$remotePath,$fileMode";
     final sendData = _buildSyncCommand(SyncProtocol.cmdSend, sendPath);
 
     await _stream.write(sendData);
+    print('SEND命令已发送');
 
     // 读取文件并发送数据
     final fileStream = file.openRead();
+    int totalBytes = 0;
     await for (final chunk in fileStream) {
       final data = _buildSyncCommand(SyncProtocol.cmdData, chunk);
       await _stream.write(data);
+      totalBytes += chunk.length;
+      print('发送数据块: ${chunk.length} 字节，总计: $totalBytes 字节');
     }
 
     // 发送完成标记
     final doneData = _buildSyncCommand(SyncProtocol.cmdDone, lastMod);
     await _stream.write(doneData);
+    print('DONE命令已发送');
 
     // 等待响应
     final response = await _responseController.stream.first;
     if (response is SyncFailResponse) {
       throw Exception('文件发送失败：${response.error}');
+    } else if (response is SyncOkResponse) {
+      print('文件发送成功');
     }
   }
 
   /// 接收文件
   Future<void> recv(String remotePath, File localFile) async {
+    print('开始接收文件: $remotePath -> ${localFile.path}');
+
     // 发送RECV命令
     final recvData = _buildSyncCommand(SyncProtocol.cmdRecv, remotePath);
     await _stream.write(recvData);
+    print('RECV命令已发送');
 
     // 创建文件写入器
     final sink = localFile.openWrite();
+    int totalBytes = 0;
 
     try {
       await for (final response in _responseController.stream) {
         if (response is SyncDataResponse) {
           sink.add(response.data);
+          totalBytes += response.data.length;
+          print('接收数据块: ${response.data.length} 字节，总计: $totalBytes 字节');
         } else if (response is SyncDoneResponse) {
+          print('文件接收完成，总计: $totalBytes 字节');
           break;
         } else if (response is SyncFailResponse) {
           throw Exception('文件接收失败：${response.error}');
@@ -191,6 +207,51 @@ class AdbSyncStream {
     } finally {
       await sink.close();
     }
+  }
+
+  /// 获取文件状态
+  Future<SyncStatResponse> stat(String remotePath) async {
+    print('获取文件状态: $remotePath');
+
+    // 发送STAT命令
+    final statData = _buildSyncCommand(SyncProtocol.cmdStat, remotePath);
+    await _stream.write(statData);
+
+    // 等待响应
+    final response = await _responseController.stream.first;
+    if (response is SyncStatResponse) {
+      print('文件状态: mode=${response.mode}, size=${response.size}, time=${response.time}');
+      return response;
+    } else if (response is SyncFailResponse) {
+      throw Exception('获取文件状态失败：${response.error}');
+    } else {
+      throw Exception('意外的响应类型: $response');
+    }
+  }
+
+  /// 列出目录内容
+  Future<List<SyncDentResponse>> list(String remotePath) async {
+    print('列出目录内容: $remotePath');
+
+    // 发送LIST命令
+    final listData = _buildSyncCommand(SyncProtocol.cmdList, remotePath);
+    await _stream.write(listData);
+
+    final entries = <SyncDentResponse>[];
+    
+    await for (final response in _responseController.stream) {
+      if (response is SyncDentResponse) {
+        entries.add(response);
+        print('目录项: ${response.name} (${response.mode}, ${response.size} bytes)');
+      } else if (response is SyncDoneResponse) {
+        print('目录列表完成，共 ${entries.length} 项');
+        break;
+      } else if (response is SyncFailResponse) {
+        throw Exception('列出目录失败：${response.error}');
+      }
+    }
+
+    return entries;
   }
 
   /// 构建sync命令

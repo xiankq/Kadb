@@ -77,53 +77,77 @@ class AdbShellStream {
 
     print('处理shell数据，长度: ${data.length}');
 
-    // 使用正确的Shell数据包解析
-    final packet = AdbShellPacketFactory.parseFromData(data);
-    if (packet == null) {
-      print('无法解析shell数据包');
-      return;
-    }
+    try {
+      // 使用标准Shell数据包格式解析
+      if (data.length < 5) {
+        print('数据长度不足，无法解析Shell数据包');
+        return;
+      }
 
-    print('解析到数据包: ${packet.runtimeType}');
+      final buffer = ByteData.sublistView(data);
+      final id = buffer.getUint8(0);
+      final length = buffer.getUint32(1, Endian.little);
 
-    switch (packet.id) {
-      case AdbShellPacketV2.idStdout:
-        if (packet is StdOutPacket) {
-          final payloadStr = String.fromCharCodes(packet.payload);
+      print('Shell数据包 - ID: $id, 长度: $length');
+
+      // 验证数据包长度
+      if (data.length != 5 + length) {
+        print('数据包长度不匹配：期望 ${5 + length}，实际 ${data.length}');
+        return;
+      }
+
+      // 获取载荷数据
+      final payload = length > 0 ? data.sublist(5) : Uint8List(0);
+
+      switch (id) {
+        case AdbShellPacketV2.idStdout:
+          final payloadStr = String.fromCharCodes(payload);
           print('STDOUT: $payloadStr');
           if (!_stdoutController.isClosed) {
             _stdoutController.add(payloadStr);
           }
-        }
-        break;
-      case AdbShellPacketV2.idStderr:
-        if (packet is StdErrorPacket) {
-          final payloadStr = String.fromCharCodes(packet.payload);
+          break;
+        case AdbShellPacketV2.idStderr:
+          final payloadStr = String.fromCharCodes(payload);
           print('STDERR: $payloadStr');
           if (!_stderrController.isClosed) {
             _stderrController.add(payloadStr);
           }
-        }
-        break;
-      case AdbShellPacketV2.idExit:
-        if (packet is ExitPacket) {
-          print('EXIT: ${packet.exitCode}');
-          if (!_exitCodeCompleter.isCompleted) {
-            _exitCodeCompleter.complete(packet.exitCode);
+          break;
+        case AdbShellPacketV2.idExit:
+          if (length == 1 && payload.length == 1) {
+            final exitCode = payload[0];
+            print('EXIT: $exitCode');
+            if (!_exitCodeCompleter.isCompleted) {
+              _exitCodeCompleter.complete(exitCode);
+            }
+          } else {
+            print('无效的退出数据包格式');
           }
-        }
-        break;
-      case AdbShellPacketV2.idCloseStdin:
-        print('CLOSE_STDIN');
-        break;
-      case AdbShellPacketV2.idWindowSizeChange:
-        if (packet is WindowSizeChangePacket) {
-          print('WINDOW_SIZE_CHANGE: ${packet.width}x${packet.height}');
-        }
-        break;
-      default:
-        print('未知的Shell数据包类型：${packet.id}');
-        break;
+          break;
+        case AdbShellPacketV2.idCloseStdin:
+          print('CLOSE_STDIN');
+          break;
+        case AdbShellPacketV2.idWindowSizeChange:
+          if (length == 4 && payload.length == 4) {
+            final widthBuffer = ByteData.sublistView(payload, 0, 2);
+            final heightBuffer = ByteData.sublistView(payload, 2, 4);
+            final width = widthBuffer.getUint16(0, Endian.little);
+            final height = heightBuffer.getUint16(0, Endian.little);
+            print('WINDOW_SIZE_CHANGE: ${width}x${height}');
+          } else {
+            print('窗口大小变更数据包格式错误');
+          }
+          break;
+        default:
+          print('未知的Shell数据包类型：$id');
+          break;
+      }
+    } catch (e) {
+      print('解析Shell数据包时出错：$e');
+      if (!_stderrController.isClosed) {
+        _stderrController.addError(e);
+      }
     }
   }
 
@@ -140,19 +164,30 @@ class AdbShellStream {
     }
   }
 
-  /// 写入数据到shell（如果支持）
+  /// 写入数据到shell（标准输入）
   Future<void> write(String data) async {
     if (_stream.isClosed) {
       throw StateError('Shell流已关闭');
     }
 
-    // 创建标准输入数据包
-    final packet = AdbShellPacketFactory.createStdin(data);
-    final packetData = Uint8List(packet.payload.length + 1);
-    packetData[0] = packet.id;
-    packetData.setAll(1, packet.payload);
-
-    await _stream.write(packetData);
+    try {
+      print('向shell写入数据: ${data.length} 字节');
+      
+      // 构建标准输入数据包
+      final bytes = data.codeUnits;
+      final packetData = Uint8List(5 + bytes.length);
+      final buffer = ByteData.sublistView(packetData);
+      
+      buffer.setUint8(0, AdbShellPacketV2.idStdin);
+      buffer.setUint32(1, bytes.length, Endian.little);
+      packetData.setAll(5, bytes);
+      
+      await _stream.write(packetData);
+      print('数据写入完成');
+    } catch (e) {
+      print('写入shell数据失败: $e');
+      rethrow;
+    }
   }
 
   /// 关闭shell流

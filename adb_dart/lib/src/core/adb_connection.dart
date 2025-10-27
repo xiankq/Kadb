@@ -28,28 +28,29 @@ import '../transport/socket_transport_channel.dart';
 class AdbConnection {
   final AdbReader _reader;
   final AdbWriter _writer;
+  final AdbMessageQueue _messageQueue;
   final Socket _socket;
   final Set<String> _supportedFeatures;
   final int _version;
   final int _maxPayloadSize;
   final Random _random = Random();
-  final AdbMessageQueue _messageQueue;
   final Map<int, StreamController<AdbMessage>> _streamControllers = {};
 
   AdbConnection({
     required AdbReader reader,
     required AdbWriter writer,
+    required AdbMessageQueue messageQueue,
     required Socket socket,
     required Set<String> supportedFeatures,
     required int version,
     required int maxPayloadSize,
   }) : _reader = reader,
        _writer = writer,
+       _messageQueue = messageQueue,
        _socket = socket,
        _supportedFeatures = supportedFeatures,
        _version = version,
-       _maxPayloadSize = maxPayloadSize,
-       _messageQueue = AdbMessageQueue(reader) {
+       _maxPayloadSize = maxPayloadSize {
     _startMessageHandling();
   }
 
@@ -185,6 +186,7 @@ class AdbConnection {
     Socket? socket;
     AdbReader? reader;
     AdbWriter? writer;
+    AdbMessageQueue? messageQueue;
 
     try {
       // 建立socket连接
@@ -192,6 +194,7 @@ class AdbConnection {
       final channel = SocketTransportChannel(socket);
       reader = AdbReader(channel);
       writer = AdbWriter(channel);
+      messageQueue = AdbMessageQueue(reader);
 
       print('正在发送连接消息...');
       // 发送连接消息
@@ -203,7 +206,15 @@ class AdbConnection {
       while (true) {
         print('读取下一条消息...');
         try {
-          message = await reader!.readMessage().timeout(const Duration(seconds: 30));
+          // 只使用消息队列来读取消息，完全避免流冲突
+          try {
+            message = await messageQueue!.waitForMessage(0, AdbProtocol.cmdAuth)
+                .timeout(const Duration(seconds: 30));
+          } catch (e) {
+            print('等待特定消息失败，尝试读取任何消息: $e');
+            await Future.delayed(Duration(milliseconds: 100));
+            message = await messageQueue!.messageStream.first.timeout(const Duration(seconds: 30));
+          }
           print('接收到消息: ${message.command.toRadixString(16)}');
         } catch (e) {
           print('读取消息失败: $e');
@@ -217,14 +228,17 @@ class AdbConnection {
             await writer!.writeStls(message.arg0);
 
             try {
+              print('创建TLS上下文...');
               final sslContext = SslUtils.getSslContext(keyPair);
+              
+              print('建立TLS连接...');
               final secureSocket = await SslUtils.createTlsClient(
                 host,
                 port,
                 keyPair,
               );
 
-              // 执行TLS握手
+              print('执行TLS握手验证...');
               await SslUtils.handshake(
                 secureSocket,
                 const Duration(seconds: 30),
@@ -233,18 +247,29 @@ class AdbConnection {
               print('TLS握手成功，切换到加密通道...');
 
               // 关闭当前的reader和writer
-              reader.close();
-              writer.close();
+              reader?.close();
+              writer?.close();
+              messageQueue?.close();
 
               // 创建新的基于TLS的reader和writer
-              // 这里需要将SecureSocket适配到我们的TransportChannel接口
               final tlsChannel = _createTlsTransportChannel(secureSocket);
               reader = AdbReader(tlsChannel);
               writer = AdbWriter(tlsChannel);
+              messageQueue = AdbMessageQueue(reader);
 
-              // 继续读取消息
-              message = await reader.readMessage();
+              print('等待TLS通道上的第一条消息...');
+              // 继续读取消息 - 只使用消息队列
+              try {
+                message = await messageQueue.waitForMessage(0, AdbProtocol.cmdAuth)
+                    .timeout(const Duration(seconds: 30));
+              } catch (e) {
+                print('等待TLS AUTH消息失败，尝试读取任何消息: $e');
+                await Future.delayed(Duration(milliseconds: 100));
+                message = await messageQueue.messageStream.first.timeout(const Duration(seconds: 30));
+              }
+              print('收到TLS消息: ${message.command.toRadixString(16)}');
             } catch (t) {
+              print('TLS处理失败: $t');
               throw TlsErrorMapper.map(t);
             }
 
@@ -260,8 +285,16 @@ class AdbConnection {
             await writer!.writeAuth(AdbProtocol.authTypeSignature, signature);
 
             print('等待认证响应...');
-            // 等待响应
-            message = await reader.readMessage();
+            // 等待响应 - 只使用消息队列，避免流冲突
+            try {
+              message = await messageQueue!.waitForMessage(0, AdbProtocol.cmdAuth)
+                  .timeout(const Duration(seconds: 30));
+            } catch (e) {
+              // 如果等待特定消息失败，尝试读取任何消息
+              print('等待特定消息失败，尝试读取任何消息: $e');
+              await Future.delayed(Duration(milliseconds: 100)); // 小延迟避免竞态
+              message = await messageQueue!.messageStream.first.timeout(const Duration(seconds: 30));
+            }
 
             // 如果还需要公钥认证
             if (message.command == AdbProtocol.cmdAuth) {
@@ -270,7 +303,15 @@ class AdbConnection {
               final publicKeyData = await _generateAdbPublicKey(keyPair);
               await writer!.writeAuth(AdbProtocol.authTypeRsaPublic, publicKeyData);
               print('公钥已发送，等待响应...');
-              message = await reader.readMessage();
+              // 只使用消息队列，避免流冲突
+              try {
+                message = await messageQueue!.waitForMessage(0, AdbProtocol.cmdCnxc)
+                    .timeout(const Duration(seconds: 30));
+              } catch (e) {
+                print('等待CNXC消息失败，尝试读取任何消息: $e');
+                await Future.delayed(Duration(milliseconds: 100));
+                message = await messageQueue!.messageStream.first.timeout(const Duration(seconds: 30));
+              }
             }
             break;
 
@@ -283,8 +324,9 @@ class AdbConnection {
             print('支持的特性：$features');
 
             final connection = AdbConnection(
-              reader: reader,
+              reader: reader!,
               writer: writer!,
+              messageQueue: messageQueue!,
               socket: socket,
               supportedFeatures: features,
               version: message.arg0,
@@ -302,14 +344,17 @@ class AdbConnection {
       print('连接过程出错: $e');
       // 清理资源
       try {
-        reader?.close();
-      } catch (_) {}
-      try {
-        writer?.close();
-      } catch (_) {}
-      try {
-        socket?.close();
-      } catch (_) {}
+      messageQueue?.close();
+    } catch (_) {}
+    try {
+      reader?.close();
+    } catch (_) {}
+    try {
+      writer?.close();
+    } catch (_) {}
+    try {
+      socket?.close();
+    } catch (_) {}
       rethrow;
     }
   }

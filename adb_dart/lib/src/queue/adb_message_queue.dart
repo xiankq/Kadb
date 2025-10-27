@@ -22,7 +22,10 @@ class AdbMessageQueue extends MessageQueue<AdbMessage> {
   StreamSubscription<AdbMessage>? _messageSubscription;
 
   AdbMessageQueue(this._adbReader) {
-    startListening();
+    // 延迟启动监听，避免与AdbReader的初始化冲突
+    Future.delayed(Duration.zero, () {
+      startListening();
+    });
   }
 
   @override
