@@ -3,7 +3,6 @@
 library;
 
 import 'dart:typed_data';
-import '../utils/crc32.dart';
 import 'adb_protocol.dart';
 
 /// ADB消息头部大小（24字节）
@@ -76,32 +75,36 @@ class AdbMessage {
     return magic == (command ^ 0xffffffff);
   }
 
-  /// 验证数据CRC32
-  bool verifyCrc32() {
+  /// 验证数据校验和（Kadb使用简单校验和，非CRC32）
+  bool verifyChecksum() {
     if (payload == null || payload!.isEmpty) {
       return dataCrc32 == 0;
     }
 
-    final crc32 = _calculateCrc32(payload!);
-    return crc32 == dataCrc32;
+    final checksum = _calculateChecksum(payload!);
+    return checksum == dataCrc32;
   }
 
-  /// 计算CRC32校验和
-  static int _calculateCrc32(Uint8List data) {
-    return Crc32.calculate(data);
+  /// 计算简单校验和（兼容Kadb实现）
+  static int _calculateChecksum(Uint8List data) {
+    int checksum = 0;
+    for (int i = 0; i < data.length; i++) {
+      checksum += data[i] & 0xFF;
+    }
+    return checksum;
   }
 
   /// 创建CONNECT消息
   factory AdbMessage.connect(int version, int maxData, String systemIdentity) {
     final payload = Uint8List.fromList(systemIdentity.codeUnits);
-    final crc32 = _calculateCrc32(payload);
+    final checksum = _calculateChecksum(payload);
 
     return AdbMessage(
       command: AdbProtocol.cmdCnxn,
       arg0: version,
       arg1: maxData,
       dataLength: payload.length,
-      dataCrc32: crc32,
+      dataCrc32: checksum,
       magic: AdbProtocol.cmdCnxn ^ 0xffffffff,
       payload: payload,
     );
@@ -109,14 +112,14 @@ class AdbMessage {
 
   /// 创建AUTH消息
   factory AdbMessage.auth(int type, Uint8List data) {
-    final crc32 = data.isEmpty ? 0 : _calculateCrc32(data);
+    final checksum = data.isEmpty ? 0 : _calculateChecksum(data);
 
     return AdbMessage(
       command: AdbProtocol.cmdAuth,
       arg0: type,
       arg1: 0,
       dataLength: data.length,
-      dataCrc32: crc32,
+      dataCrc32: checksum,
       magic: AdbProtocol.cmdAuth ^ 0xffffffff,
       payload: data,
     );
@@ -125,14 +128,14 @@ class AdbMessage {
   /// 创建OPEN消息
   factory AdbMessage.open(int localId, String destination) {
     final payload = Uint8List.fromList(destination.codeUnits);
-    final crc32 = _calculateCrc32(payload);
+    final checksum = _calculateChecksum(payload);
 
     return AdbMessage(
       command: AdbProtocol.cmdOpen,
       arg0: localId,
       arg1: 0,
       dataLength: payload.length,
-      dataCrc32: crc32,
+      dataCrc32: checksum,
       magic: AdbProtocol.cmdOpen ^ 0xffffffff,
       payload: payload,
     );
@@ -164,14 +167,14 @@ class AdbMessage {
 
   /// 创建WRITE消息
   factory AdbMessage.write(int localId, int remoteId, Uint8List data) {
-    final crc32 = data.isEmpty ? 0 : _calculateCrc32(data);
+    final checksum = data.isEmpty ? 0 : _calculateChecksum(data);
 
     return AdbMessage(
       command: AdbProtocol.cmdWrte,
       arg0: localId,
       arg1: remoteId,
       dataLength: data.length,
-      dataCrc32: crc32,
+      dataCrc32: checksum,
       magic: AdbProtocol.cmdWrte ^ 0xffffffff,
       payload: data,
     );

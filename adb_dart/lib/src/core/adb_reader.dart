@@ -59,9 +59,9 @@ class AdbReader {
         payload: payload,
       );
 
-      // 验证CRC32
-      if (!fullMessage.verifyCrc32()) {
-        throw AdbProtocolException('CRC32 verification failed');
+      // 验证校验和（Kadb使用简单校验和，非CRC32）
+      if (!fullMessage.verifyChecksum()) {
+        throw AdbProtocolException('Checksum verification failed');
       }
 
       // 从缓冲区中移除已处理的数据

@@ -39,8 +39,8 @@ class AndroidPubkey {
     final nWords = _extractWords(n);
     final rrWords = _extractWords(rSquared);
 
-    // 构建输出缓冲区
-    final buffer = ByteData(keyLengthWords * 4 * 2 + 8);
+    // 构建输出缓冲区 - 确保足够大
+    final buffer = ByteData(keyLengthWords * 4 * 2 + 8 + 4); // 额外增加4字节
     var offset = 0;
 
     // len
@@ -63,10 +63,11 @@ class AndroidPubkey {
       offset += 4;
     }
 
-    // exponent
-    buffer.setInt32(offset, e.toInt(), Endian.little);
+    // exponent - 使用setUint32而不是setInt32避免符号问题
+    buffer.setUint32(offset, e.toInt(), Endian.little);
 
-    return buffer.buffer.asUint8List();
+    // 只返回使用的字节
+    return buffer.buffer.asUint8List(0, offset + 4);
   }
 
   /// 从大整数中提取指定位置的32位字

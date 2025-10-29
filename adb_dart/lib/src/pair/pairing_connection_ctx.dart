@@ -10,6 +10,39 @@ import '../cert/adb_key_pair.dart';
 import '../exception/adb_exceptions.dart';
 import '../tls/ssl_utils.dart';
 
+/// 配对协议常量（对标Kadb实现）
+class PairingProtocol {
+  /// 最大对等信息大小
+  static const int peerInfoMaxSize = 1 << 13; // 8192字节
+
+  /// ADB RSA公钥类型
+  static const int adbRsaPubKey = 0;
+
+  /// ADB设备GUID类型
+  static const int adbDeviceGuid = 0;
+
+  /// 当前密钥头部版本
+  static const int currentKeyHeaderVersion = 1;
+
+  /// 最小支持的密钥头部版本
+  static const int minSupportedKeyHeaderVersion = 1;
+
+  /// 最大支持的密钥头部版本
+  static const int maxSupportedKeyHeaderVersion = 1;
+
+  /// 最大载荷大小
+  static const int maxPayloadSize = 2 * peerInfoMaxSize;
+
+  /// 配对数据包头部大小
+  static const int pairingPacketHeaderSize = 6;
+
+  /// SPAKE2消息类型
+  static const int spake2Msg = 0;
+
+  /// 对等信息类型
+  static const int peerInfo = 1;
+}
+
 /// 配对协议数据包头部
 class PairingPacketHeader {
   final int version;
@@ -102,11 +135,7 @@ class PairingConnectionCtx {
     _peerInfo = PeerInfo(PairingProtocol.adbRsaPubKey, publicKeyData);
 
     // 创建认证上下文（Alice角色）
-    final authCtx = SimplePairingAuthCtx.createAlice(password);
-    if (authCtx == null) {
-      throw AdbPairAuthException('无法创建配对认证上下文');
-    }
-    _authCtx = authCtx;
+    _authCtx = createAlice(password);
   }
 
   /// 开始配对过程

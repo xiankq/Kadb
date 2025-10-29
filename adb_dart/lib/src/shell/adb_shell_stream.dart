@@ -85,7 +85,7 @@ class AdbShellStream {
   /// 读取所有输出（阻塞直到命令完成）
   Future<AdbShellResponse> readAll() async {
     // 等待退出码
-    final exitCode = await _exitCodeCompleter.future;
+    await _exitCodeCompleter.future;
     return _responseBuilder.build();
   }
 
