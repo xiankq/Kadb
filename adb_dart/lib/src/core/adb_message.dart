@@ -1,7 +1,6 @@
-/**
- * ADB消息结构
- * 基于Android ADB协议规范
- */
+/// ADB消息结构
+/// 基于Android ADB协议规范
+library;
 
 import 'dart:typed_data';
 import '../utils/crc32.dart';
@@ -42,7 +41,8 @@ class AdbMessage {
   /// 从字节数组解析消息头部
   factory AdbMessage.fromHeader(Uint8List header) {
     if (header.length != adbMessageHeaderSize) {
-      throw ArgumentError('Invalid header size: ${header.length}, expected: $adbMessageHeaderSize');
+      throw ArgumentError(
+          'Invalid header size: ${header.length}, expected: $adbMessageHeaderSize');
     }
 
     final data = ByteData.sublistView(header);
@@ -192,7 +192,7 @@ class AdbMessage {
   @override
   String toString() {
     return 'AdbMessage{command: ${AdbProtocol.getCommandName(command)}(0x${command.toRadixString(16)}), '
-           'arg0: $arg0, arg1: $arg1, dataLength: $dataLength, '
-           'dataCrc32: 0x${dataCrc32.toRadixString(16)}, valid: ${isValid()}}';
+        'arg0: $arg0, arg1: $arg1, dataLength: $dataLength, '
+        'dataCrc32: 0x${dataCrc32.toRadixString(16)}, valid: ${isValid()}}';
   }
 }

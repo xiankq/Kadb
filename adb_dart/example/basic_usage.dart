@@ -1,7 +1,6 @@
-/**
- * AdbDart使用示例
- * 展示如何连接ADB设备并执行基本操作
- */
+/// AdbDart使用示例
+/// 展示如何连接ADB设备并执行基本操作
+library;
 
 import 'package:adb_dart/adb_dart.dart';
 
@@ -10,7 +9,7 @@ void main() async {
 
   // 创建ADB客户端实例
   final adb = AdbDart(
-    host: 'localhost',
+    host: '192.168.2.148',
     port: 5555,
   );
 
@@ -53,7 +52,6 @@ void main() async {
     print('屏幕密度: $wmDensity');
 
     print('\n=== 示例完成 ===');
-
   } catch (e) {
     print('错误: $e');
   } finally {
@@ -124,7 +122,6 @@ Future<void> deviceManagementExample() async {
     print('\nCPU信息:');
     final cpuInfo = await adb.shell('cat /proc/cpuinfo');
     print(cpuInfo);
-
   } catch (e) {
     print('设备管理错误: $e');
   } finally {

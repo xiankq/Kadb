@@ -8,7 +8,6 @@ import 'package:adb_dart/src/cert/adb_key_pair.dart';
 
 /// TLS安全配对示例
 class TlsPairingExample {
-
   /// 运行配对示例
   static Future<void> runExample() async {
     print('=== ADB Dart TLS安全配对示例 ===\n');
@@ -22,13 +21,18 @@ class TlsPairingExample {
     print('RSA密钥对生成完成\n');
 
     // 读取配对信息
-    final host = await _readInput('请输入设备IP地址 (默认: 192.168.1.100): ') ?? '192.168.1.100';
-    final port = int.tryParse(await _readInput('请输入设备端口 (默认: 5555): ') ?? '5555') ?? 5555;
+    final host =
+        await _readInput('请输入设备IP地址 (默认: 192.168.1.100): ') ?? '192.168.1.100';
+    final port =
+        int.tryParse(await _readInput('请输入设备端口 (默认: 5555): ') ?? '5555') ??
+            5555;
     final pairingCode = await _readInput('请输入配对码 (6位数字): ');
-    final deviceName = await _readInput('请输入设备名称 (默认: adb_dart_example): ') ?? 'adb_dart_example';
+    final deviceName = await _readInput('请输入设备名称 (默认: adb_dart_example): ') ??
+        'adb_dart_example';
 
     // 验证配对码格式
-    if (pairingCode == null || !TlsDevicePairingManager.validatePairingCode(pairingCode)) {
+    if (pairingCode == null ||
+        !TlsDevicePairingManager.validatePairingCode(pairingCode)) {
       print('❌ 配对码格式错误，请输入6位数字');
       return;
     }
@@ -54,7 +58,6 @@ class TlsPairingExample {
 
       // 演示配对成功后的ADB操作
       await _demoAdbOperations(host, port, keyPair);
-
     } catch (e) {
       print('\n❌ 配对失败: $e');
       print('请检查:');
@@ -66,7 +69,8 @@ class TlsPairingExample {
   }
 
   /// 演示ADB操作
-  static Future<void> _demoAdbOperations(String host, int port, AdbKeyPair keyPair) async {
+  static Future<void> _demoAdbOperations(
+      String host, int port, AdbKeyPair keyPair) async {
     print('=== 演示ADB操作 ===\n');
 
     final adb = AdbDart(
@@ -97,7 +101,6 @@ class TlsPairingExample {
       print('命令输出: $result\n');
 
       print('✅ ADB操作演示完成');
-
     } catch (e) {
       print('❌ ADB操作失败: $e');
     } finally {

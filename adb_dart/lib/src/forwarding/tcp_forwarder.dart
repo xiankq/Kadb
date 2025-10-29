@@ -25,15 +25,15 @@ class TcpForwarder {
   ServerSocket? _serverSocket;
   Timer? _acceptTimer;
   final List<Socket> _clientSockets = [];
-  Future<AdbStream> Function()? _streamCreator; // 流创建函数
+  final Future<AdbStream> Function()? _streamCreator; // 流创建函数
 
   TcpForwarder({
     required int hostPort,
     required int targetPort,
     Future<AdbStream> Function()? streamCreator,
-  }) : _hostPort = hostPort,
-       _targetPort = targetPort,
-       _streamCreator = streamCreator;
+  })  : _hostPort = hostPort,
+        _targetPort = targetPort,
+        _streamCreator = streamCreator;
 
   /// 获取当前状态
   TcpForwarderState get state => _state;
@@ -54,7 +54,8 @@ class TcpForwarder {
 
     try {
       // 创建本地服务器套接字
-      _serverSocket = await ServerSocket.bind(InternetAddress.loopbackIPv4, _hostPort);
+      _serverSocket =
+          await ServerSocket.bind(InternetAddress.loopbackIPv4, _hostPort);
       _serverSocket!.listen(_handleClient, onError: _handleError);
 
       _state = TcpForwarderState.started;
@@ -70,7 +71,8 @@ class TcpForwarder {
 
   /// 停止端口转发
   Future<void> stop() async {
-    if (_state == TcpForwarderState.stopped || _state == TcpForwarderState.stopping) {
+    if (_state == TcpForwarderState.stopped ||
+        _state == TcpForwarderState.stopping) {
       return;
     }
 

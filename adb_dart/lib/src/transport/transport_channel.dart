@@ -54,7 +54,8 @@ class TcpTransportChannel implements TransportChannel {
     subscription = _socket.listen(
       (data) {
         if (!completer.isCompleted) {
-          final bytesToRead = data.length < buffer.length ? data.length : buffer.length;
+          final bytesToRead =
+              data.length < buffer.length ? data.length : buffer.length;
           buffer.setAll(0, data.sublist(0, bytesToRead));
           completer.complete(bytesToRead);
           subscription.cancel();
@@ -76,7 +77,8 @@ class TcpTransportChannel implements TransportChannel {
     Timer(timeout, () {
       if (!completer.isCompleted) {
         subscription.cancel();
-        completer.completeError(TimeoutException('Read timeout after $timeout'));
+        completer
+            .completeError(TimeoutException('Read timeout after $timeout'));
       }
     });
 
@@ -147,7 +149,8 @@ class TcpTransportChannel implements TransportChannel {
 
 /// 传输通道工厂
 class TransportFactory {
-  static Future<TransportChannel> connect(String host, int port, Duration connectTimeout) async {
+  static Future<TransportChannel> connect(
+      String host, int port, Duration connectTimeout) async {
     final socket = await Socket.connect(host, port, timeout: connectTimeout);
     socket.setOption(SocketOption.tcpNoDelay, true);
     return TcpTransportChannel(socket);

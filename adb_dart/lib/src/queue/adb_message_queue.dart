@@ -4,7 +4,6 @@ library adb_message_queue;
 
 import 'dart:async';
 import 'dart:collection';
-import 'dart:typed_data';
 import '../core/adb_message.dart';
 import '../core/adb_reader.dart';
 import '../core/adb_protocol.dart';
@@ -89,7 +88,8 @@ class AdbMessageQueue {
         const Duration(seconds: 30),
         onTimeout: () {
           _pendingMessages.remove(localId);
-          throw AdbStreamException('Timeout waiting for command ${AdbProtocol.getCommandName(expectedCommand)} on localId $localId');
+          throw AdbStreamException(
+              'Timeout waiting for command ${AdbProtocol.getCommandName(expectedCommand)} on localId $localId');
         },
       );
     } catch (e) {
@@ -110,7 +110,8 @@ class AdbMessageQueue {
   }
 
   /// 检查消息是否匹配
-  bool _isMatchingMessage(AdbMessage message, int localId, int expectedCommand) {
+  bool _isMatchingMessage(
+      AdbMessage message, int localId, int expectedCommand) {
     // 检查命令类型
     if (message.command != expectedCommand) {
       return false;
@@ -191,7 +192,8 @@ class AdbMessageQueue {
   /// 确保队列为空（用于测试）
   void ensureEmpty() {
     if (_messageQueue.isNotEmpty) {
-      throw StateError('Message queue is not empty, contains ${_messageQueue.length} messages');
+      throw StateError(
+          'Message queue is not empty, contains ${_messageQueue.length} messages');
     }
   }
 }

@@ -1,14 +1,10 @@
-/**
- * ADB连接管理
- * 处理与ADB设备的连接建立和管理
- */
+/// ADB连接管理
+/// 处理与ADB设备的连接建立和管理
+library;
 
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
-import 'package:pointycastle/pointycastle.dart' as pc;
-import 'package:convert/convert.dart';
 import 'adb_message.dart';
 import 'adb_reader.dart';
 import 'adb_writer.dart';
@@ -74,7 +70,8 @@ class AdbConnection {
   /// 建立连接
   Future<void> connect() async {
     if (_state != AdbConnectionState.disconnected) {
-      throw AdbConnectionException('Connection is already established or in progress');
+      throw AdbConnectionException(
+          'Connection is already established or in progress');
     }
 
     _state = AdbConnectionState.connecting;
@@ -125,7 +122,8 @@ class AdbConnection {
           return;
 
         default:
-          throw AdbProtocolException('Unexpected message during connection: ${AdbProtocol.getCommandName(response.command)}');
+          throw AdbProtocolException(
+              'Unexpected message during connection: ${AdbProtocol.getCommandName(response.command)}');
       }
     }
   }

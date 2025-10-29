@@ -67,7 +67,7 @@ class PeerInfo {
 
   /// 从字节数组解析
   factory PeerInfo.parse(Uint8List data) {
-    if (data.length < 1) {
+    if (data.isEmpty) {
       throw AdbPairAuthException('无效的对等节点信息');
     }
 
@@ -187,7 +187,8 @@ class PairingConnectionCtx {
     }
 
     final theirPeerInfo = PeerInfo.parse(decryptedData);
-    print('收到设备对等节点信息: type=${theirPeerInfo.type}, data长度=${theirPeerInfo.data.length}');
+    print(
+        '收到设备对等节点信息: type=${theirPeerInfo.type}, data长度=${theirPeerInfo.data.length}');
   }
 
   /// 写入数据包
@@ -206,7 +207,8 @@ class PairingConnectionCtx {
 
   /// 读取数据包头部
   Future<PairingPacketHeader> _readHeader() async {
-    final headerData = await _readExact(PairingProtocol.pairingPacketHeaderSize);
+    final headerData =
+        await _readExact(PairingProtocol.pairingPacketHeaderSize);
     return PairingPacketHeader.parse(headerData);
   }
 
@@ -288,7 +290,7 @@ class DevicePairingManager {
 /// 在标准配对协议基础上添加TLS加密层
 class TlsPairingConnectionCtx extends PairingConnectionCtx {
   SecureSocket? _secureSocket;
-  bool _useTls;
+  final bool _useTls;
 
   TlsPairingConnectionCtx({
     required super.host,

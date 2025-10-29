@@ -71,7 +71,9 @@ class SimplePairingAuthCtx implements PairingAuthCtx {
     // 简单的XOR加密（仅用于演示，实际应该使用安全的加密算法）
     final result = Uint8List(input.length);
     for (int i = 0; i < input.length; i++) {
-      result[i] = input[i] ^ _password[i % _password.length] ^ _theirMsg![i % _theirMsg!.length];
+      result[i] = input[i] ^
+          _password[i % _password.length] ^
+          _theirMsg![i % _theirMsg!.length];
     }
     return result;
   }

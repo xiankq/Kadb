@@ -11,7 +11,8 @@ import '../exception/adb_exceptions.dart';
 
 /// ADB消息读取器
 class AdbReader {
-  final StreamController<AdbMessage> _messageController = StreamController<AdbMessage>();
+  final StreamController<AdbMessage> _messageController =
+      StreamController<AdbMessage>();
   final Socket _socket;
   final _buffer = BytesBuilder();
 
@@ -44,7 +45,8 @@ class AdbReader {
 
       // 提取数据载荷
       final allData = _buffer.toBytes();
-      final payload = allData.sublist(adbMessageHeaderSize, adbMessageHeaderSize + message.dataLength);
+      final payload = allData.sublist(
+          adbMessageHeaderSize, adbMessageHeaderSize + message.dataLength);
 
       // 重新创建包含载荷的消息
       final fullMessage = AdbMessage(

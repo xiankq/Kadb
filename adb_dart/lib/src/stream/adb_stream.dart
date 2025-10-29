@@ -19,7 +19,8 @@ class AdbStream {
   final int remoteId;
 
   bool _isClosed = false;
-  final StreamController<Uint8List> _dataController = StreamController<Uint8List>();
+  final StreamController<Uint8List> _dataController =
+      StreamController<Uint8List>();
 
   AdbStream({
     required this.messageQueue,
@@ -129,7 +130,8 @@ class AdbStream {
 
     final result = buffer.toBytes();
     if (result.length < length) {
-      throw AdbStreamException('Insufficient data: expected $length, got ${result.length}');
+      throw AdbStreamException(
+          'Insufficient data: expected $length, got ${result.length}');
     }
 
     return result.sublist(0, length);
@@ -165,7 +167,8 @@ class AdbStream {
       buffer.add(data);
     }
 
-    throw AdbStreamException('Stream closed before end byte $endByte was found');
+    throw AdbStreamException(
+        'Stream closed before end byte $endByte was found');
   }
 
   /// 关闭流

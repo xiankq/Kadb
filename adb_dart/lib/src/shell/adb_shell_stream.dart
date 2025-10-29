@@ -12,7 +12,8 @@ import '../exception/adb_exceptions.dart';
 /// Shell流控制器
 class AdbShellStream {
   final AdbStream _stream;
-  final StreamController<AdbShellPacket> _packetController = StreamController<AdbShellPacket>();
+  final StreamController<AdbShellPacket> _packetController =
+      StreamController<AdbShellPacket>();
   final StreamController<String> _stdoutController = StreamController<String>();
   final StreamController<String> _stderrController = StreamController<String>();
   final Completer<int> _exitCodeCompleter = Completer<int>();
@@ -65,7 +66,8 @@ class AdbShellStream {
   }
 
   /// 发送窗口大小改变
-  Future<void> sendWindowSizeChange(int rows, int cols, int xpixel, int ypixel) async {
+  Future<void> sendWindowSizeChange(
+      int rows, int cols, int xpixel, int ypixel) async {
     if (_isClosed) {
       throw AdbStreamClosed();
     }
@@ -76,7 +78,8 @@ class AdbShellStream {
     buffer.setUint32(8, xpixel, Endian.little);
     buffer.setUint32(12, ypixel, Endian.little);
 
-    await _writePacket(AdbShellPacketV2.idWindowSizeChange, buffer.buffer.asUint8List());
+    await _writePacket(
+        AdbShellPacketV2.idWindowSizeChange, buffer.buffer.asUint8List());
   }
 
   /// 读取所有输出（阻塞直到命令完成）

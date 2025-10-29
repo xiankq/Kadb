@@ -4,7 +4,8 @@ library adb_writer;
 
 import 'dart:io';
 import 'dart:typed_data';
-import 'adb_message.dart' hide adbMessageHeaderSize, adbVersion, adbMaxPayload, adbMaxPayloadLegacy;
+import 'adb_message.dart'
+    hide adbMessageHeaderSize, adbVersion, adbMaxPayload, adbMaxPayloadLegacy;
 import 'adb_protocol.dart';
 import '../exception/adb_exceptions.dart';
 
@@ -80,7 +81,8 @@ class AdbWriter {
   }
 
   /// 写入WRITE消息（带偏移量和长度）
-  Future<void> writeWriteData(int localId, int remoteId, Uint8List data, int offset, int length) async {
+  Future<void> writeWriteData(
+      int localId, int remoteId, Uint8List data, int offset, int length) async {
     if (offset == 0 && length == data.length) {
       await writeWrite(localId, remoteId, data);
     } else {

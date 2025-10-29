@@ -48,9 +48,8 @@ class AdbKeyPair {
     Duration? validityPeriod,
   }) {
     final secureRandom = pc.SecureRandom('Fortuna')
-      ..seed(pc.KeyParameter(
-        Uint8List.fromList(List.generate(32, (i) => Random.secure().nextInt(256)))
-      ));
+      ..seed(pc.KeyParameter(Uint8List.fromList(
+          List.generate(32, (i) => Random.secure().nextInt(256)))));
 
     // 生成RSA密钥对
     final keyGen = pc.KeyGenerator('RSA')
@@ -92,7 +91,8 @@ class AdbKeyPair {
     final now = DateTime.now();
     final expiry = now.add(validityPeriod);
 
-    final certInfo = 'CN=$commonName: ${now.toIso8601String()}-${expiry.toIso8601String()}';
+    final certInfo =
+        'CN=$commonName: ${now.toIso8601String()}-${expiry.toIso8601String()}';
     return Uint8List.fromList(certInfo.codeUnits);
   }
 

@@ -81,6 +81,34 @@ class SslUtils {
     }
   }
 
+  /// 创建客户端SSL引擎（对标Kadb的newClientEngine）
+  static SecurityContext createClientEngine({
+    required String host,
+    required int port,
+    required SecurityContext sslContext,
+  }) {
+    try {
+      // 在Dart中，我们返回配置好的SecurityContext
+      // 实际的SSL引擎创建在连接时进行
+      return sslContext;
+    } catch (e) {
+      throw TlsException('Failed to create client SSL engine: $e');
+    }
+  }
+
+  /// 创建增强的KeyManager（对标Kadb的X509ExtendedKeyManager）
+  static dynamic getKeyManager(AdbKeyPair keyPair) {
+    // 在Dart中，SecurityContext处理密钥管理
+    // 这里返回一个模拟的KeyManager对象
+    return _EnhancedKeyManager(keyPair);
+  }
+
+  /// 创建接受所有证书的TrustManager（对标Kadb的getAllAcceptingTrustManager）
+  static dynamic getAllAcceptingTrustManager() {
+    // 在ADB配对中，我们接受所有证书
+    return _AllAcceptingTrustManager();
+  }
+
   /// 执行TLS握手
   static Future<void> performTlsHandshake(
     SecureSocket socket, {
@@ -135,6 +163,109 @@ class SslUtils {
       'isSecure': true,
     };
   }
+}
+
+/// 增强的KeyManager（模拟Kadb的X509ExtendedKeyManager）
+class _EnhancedKeyManager {
+  final AdbKeyPair _keyPair;
+  final String _alias = 'key';
+
+  _EnhancedKeyManager(this._keyPair);
+
+  /// 获取客户端别名（对标chooseClientAlias）
+  String? chooseClientAlias(
+    List<String>? keyTypes,
+    List<Principal>? issuers,
+    Socket? socket,
+  ) {
+    // 检查是否支持RSA
+    if (keyTypes != null &&
+        keyTypes.any((type) => type.toLowerCase().contains('rsa'))) {
+      return _alias;
+    }
+    return _alias; // 默认返回我们的别名
+  }
+
+  /// 获取客户端别名（针对SSLEngine）
+  String? chooseEngineClientAlias(
+    List<String>? keyTypes,
+    List<Principal>? issuers,
+    dynamic engine, // SSLEngine
+  ) {
+    return chooseClientAlias(keyTypes, issuers, null);
+  }
+
+  /// 获取证书链（对标getCertificateChain）
+  List<Uint8List>? getCertificateChain(String? alias) {
+    if (alias == _alias) {
+      // 返回证书链（简化处理）
+      return [_keyPair.certificate];
+    }
+    return null;
+  }
+
+  /// 获取私钥（对标getPrivateKey）
+  pc.RSAPrivateKey? getPrivateKey(String? alias) {
+    if (alias == _alias) {
+      return _keyPair.privateKey;
+    }
+    return null;
+  }
+
+  /// 获取客户端别名数组（对标getClientAliases）
+  List<String>? getClientAliases(String? keyType, List<Principal>? issuers) {
+    if (keyType?.toLowerCase().contains('rsa') ?? true) {
+      return [_alias];
+    }
+    return [_alias];
+  }
+
+  /// 获取服务器别名（对标getServerAliases）
+  List<String>? getServerAliases(String? keyType, List<Principal>? issuers) {
+    // 我们不支持服务器模式
+    return null;
+  }
+
+  /// 选择服务器别名（对标chooseServerAlias）
+  String? chooseServerAlias(
+    String? keyType,
+    List<Principal>? issuers,
+    Socket? socket,
+  ) {
+    // 我们不支持服务器模式
+    return null;
+  }
+}
+
+/// 接受所有证书的TrustManager（对标Kadb的getAllAcceptingTrustManager）
+class _AllAcceptingTrustManager {
+  /// 检查客户端可信度（对标checkClientTrusted）
+  void checkClientTrusted(List<Uint8List> chain, String authType) {
+    // 接受所有客户端证书
+    return;
+  }
+
+  /// 检查服务器可信度（对标checkServerTrusted）
+  void checkServerTrusted(List<Uint8List> chain, String authType) {
+    // 接受所有服务器证书
+    return;
+  }
+
+  /// 获取接受的发行者（对标getAcceptedIssuers）
+  List<Uint8List> getAcceptedIssuers() {
+    // 返回空数组，接受所有发行者
+    return [];
+  }
+}
+
+/// 主体信息（模拟Java的Principal）
+class Principal {
+  final String name;
+
+  Principal(this.name);
+
+  @override
+  String toString() => name;
 }
 
 /// TLS包装器

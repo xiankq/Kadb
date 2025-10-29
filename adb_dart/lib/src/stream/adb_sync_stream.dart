@@ -20,7 +20,8 @@ class FileInfo {
   });
 
   @override
-  String toString() => 'FileInfo(mode: 0${mode.toRadixString(8)}, size: $size, lastModified: $lastModified)';
+  String toString() =>
+      'FileInfo(mode: 0${mode.toRadixString(8)}, size: $size, lastModified: $lastModified)';
 }
 
 /// 目录条目
@@ -41,7 +42,8 @@ class DirectoryEntry {
   bool get isFile => (mode & 0x8000) != 0;
 
   @override
-  String toString() => 'DirectoryEntry(name: $name, mode: 0${mode.toRadixString(8)}, size: $size, lastModified: $lastModified)';
+  String toString() =>
+      'DirectoryEntry(name: $name, mode: 0${mode.toRadixString(8)}, size: $size, lastModified: $lastModified)';
 }
 
 /// 文件同步协议常量
@@ -78,7 +80,16 @@ class SyncProtocol {
 
   /// 所有有效的SYNC命令ID
   static const Set<String> validIds = {
-    list, recv, send, stat, data, done, okay, quit, fail, dent
+    list,
+    recv,
+    send,
+    stat,
+    data,
+    done,
+    okay,
+    quit,
+    fail,
+    dent
   };
 }
 
@@ -89,7 +100,9 @@ class AdbSyncStream {
   AdbSyncStream(this._stream);
 
   /// 发送文件到设备
-  Future<void> send(File localFile, String remotePath, {
+  Future<void> send(
+    File localFile,
+    String remotePath, {
     int mode = 0x1A4, // 0o644 in hex
     DateTime? lastModified,
   }) async {
@@ -97,7 +110,8 @@ class AdbSyncStream {
       throw AdbFileException('本地文件不存在: ${localFile.path}');
     }
 
-    final lastModifiedMs = (lastModified ?? localFile.lastModifiedSync()).millisecondsSinceEpoch;
+    final lastModifiedMs =
+        (lastModified ?? localFile.lastModifiedSync()).millisecondsSinceEpoch;
 
     // 发送SEND命令和文件信息
     final fileInfo = '$remotePath,$mode';

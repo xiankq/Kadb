@@ -6,7 +6,6 @@ import '../exception/adb_exceptions.dart';
 
 /// TLS错误映射器
 class TlsErrorMapper {
-
   /// 将Throwable映射为更具体的ADB异常
   static Exception map(dynamic throwable) {
     final messages = _buildMessageChain(throwable);

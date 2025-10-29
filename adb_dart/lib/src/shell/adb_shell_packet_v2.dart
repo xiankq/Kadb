@@ -58,7 +58,8 @@ abstract class AdbShellPacket {
   AdbShellPacket(this.id, this.payload);
 
   @override
-  String toString() => 'AdbShellPacket(id: ${AdbShellPacketV2.getPacketName(id)}, payloadLength: ${payload?.length ?? 0})';
+  String toString() =>
+      'AdbShellPacket(id: ${AdbShellPacketV2.getPacketName(id)}, payloadLength: ${payload?.length ?? 0})';
 }
 
 /// 标准输出包
@@ -94,7 +95,8 @@ class CloseStdInPacket extends AdbShellPacket {
 
 /// 窗口大小改变包
 class WindowSizeChangePacket extends AdbShellPacket {
-  WindowSizeChangePacket(Uint8List payload) : super(AdbShellPacketV2.idWindowSizeChange, payload);
+  WindowSizeChangePacket(Uint8List payload)
+      : super(AdbShellPacketV2.idWindowSizeChange, payload);
 
   /// 解析窗口大小信息
   /// 格式: [rows, cols, xpixel, ypixel] (各4字节)
