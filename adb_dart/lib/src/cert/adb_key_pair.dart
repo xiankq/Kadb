@@ -27,8 +27,8 @@ class AdbKeyPair {
   /// 使用私钥对数据进行签名
   Uint8List signPayload(Uint8List data) {
     try {
-      // 创建签名器
-      final signer = pc.Signer('SHA-1/RSA')
+      // 创建签名器 - 使用SHA-256/RSA (与证书保持一致)
+      final signer = pc.Signer('SHA-256/RSA')
         ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey));
 
       // 对数据进行签名

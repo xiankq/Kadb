@@ -75,37 +75,50 @@ class AdbStream {
       throw AdbStreamClosed();
     }
 
-    Uint8List? result;
+    final buffer = BytesBuilder();
+    bool dataReceived = false;
+    final completer = Completer<Uint8List>();
 
-    final subscription = dataStream.listen((data) {
-      if (result == null) {
-        result = data;
-      } else {
-        // 合并数据
-        final newResult = Uint8List(result!.length + data.length);
-        newResult.setAll(0, result!);
-        newResult.setAll(result!.length, data);
-        result = newResult;
-      }
-    });
+    // 创建临时监听器收集数据
+    StreamSubscription<Uint8List>? subscription;
 
-    // 等待一段时间或直到流关闭
-    await Future.any([
-      Future.delayed(const Duration(milliseconds: 100)),
-      Future(() async {
-        await for (final _ in dataStream) {
-          // 等待数据到达
+    subscription = dataStream.listen(
+      (data) {
+        buffer.add(data);
+        dataReceived = true;
+      },
+      onError: (error) {
+        if (!_isClosed && !completer.isCompleted) {
+          completer.completeError(error);
         }
-      }),
-    ]);
+      },
+      onDone: () {
+        if (!completer.isCompleted) {
+          if (buffer.length == 0) {
+            completer.completeError(AdbStreamException('No data received'));
+          } else {
+            completer.complete(buffer.toBytes());
+          }
+        }
+      },
+    );
 
-    await subscription.cancel();
+    try {
+      // 等待数据到达或超时
+      final result = await completer.future.timeout(
+        Duration(seconds: 5),
+        onTimeout: () {
+          if (!dataReceived) {
+            throw TimeoutException('等待数据超时');
+          }
+          return buffer.toBytes();
+        },
+      );
 
-    if (result == null) {
-      throw AdbStreamException('No data received');
+      return result;
+    } finally {
+      await subscription.cancel();
     }
-
-    return result!;
   }
 
   /// 读取字符串
@@ -119,22 +132,56 @@ class AdbStream {
     final buffer = BytesBuilder();
     int totalRead = 0;
 
-    await for (final data in dataStream) {
-      buffer.add(data);
-      totalRead += data.length;
+    // 使用单个监听器读取指定长度的数据
+    final subscription = dataStream.listen(
+      (data) {
+        if (totalRead < length) {
+          final remaining = length - totalRead;
+          final toAdd = data.length <= remaining ? data : data.sublist(0, remaining);
+          buffer.add(toAdd);
+          totalRead += toAdd.length;
+        }
+      },
+      onError: (error) {
+        if (!_isClosed) {
+          throw error;
+        }
+      },
+    );
 
-      if (totalRead >= length) {
-        break;
+    try {
+      // 等待直到读取到足够的数据或超时
+      final startTime = DateTime.now();
+      const timeout = Duration(seconds: 30);
+
+      while (totalRead < length) {
+        if (DateTime.now().difference(startTime) > timeout) {
+          throw AdbStreamException('Timeout waiting for data');
+        }
+
+        await Future.delayed(Duration(milliseconds: 10));
+
+        if (_isClosed) {
+          throw AdbStreamClosed();
+        }
       }
-    }
 
-    final result = buffer.toBytes();
-    if (result.length < length) {
-      throw AdbStreamException(
-          'Insufficient data: expected $length, got ${result.length}');
-    }
+      await subscription.cancel();
 
-    return result.sublist(0, length);
+      final result = buffer.toBytes();
+      if (result.length < length) {
+        throw AdbStreamException(
+            'Insufficient data: expected $length, got ${result.length}');
+      }
+
+      return result.sublist(0, length);
+    } catch (e) {
+      await subscription.cancel();
+      if (e is AdbStreamException || e is AdbStreamClosed) {
+        rethrow;
+      }
+      throw AdbStreamException('Failed to read exact data: $e');
+    }
   }
 
   /// 读取指定长度的数据到预分配缓冲区
@@ -150,25 +197,65 @@ class AdbStream {
   /// 读取直到遇到结束符
   Future<Uint8List> readUntil(int endByte) async {
     final buffer = BytesBuilder();
+    bool foundEndByte = false;
 
-    await for (final data in dataStream) {
-      for (int i = 0; i < data.length; i++) {
-        if (data[i] == endByte) {
-          // 找到结束符，返回数据（包含结束符）
-          if (i > 0) {
-            buffer.add(data.sublist(0, i + 1));
-          } else {
-            buffer.addByte(endByte);
+    // 使用单个监听器读取直到遇到结束符
+    final subscription = dataStream.listen(
+      (data) {
+        if (!foundEndByte) {
+          for (int i = 0; i < data.length; i++) {
+            if (data[i] == endByte) {
+              // 找到结束符，添加数据（包含结束符）
+              if (i > 0) {
+                buffer.add(data.sublist(0, i + 1));
+              } else {
+                buffer.addByte(endByte);
+              }
+              foundEndByte = true;
+              break;
+            }
           }
-          return buffer.toBytes();
+
+          // 如果没有找到结束符，添加整个数据块
+          if (!foundEndByte) {
+            buffer.add(data);
+          }
+        }
+      },
+      onError: (error) {
+        if (!_isClosed) {
+          throw error;
+        }
+      },
+    );
+
+    try {
+      // 等待直到找到结束符或超时
+      final startTime = DateTime.now();
+      const timeout = Duration(seconds: 30);
+
+      while (!foundEndByte) {
+        if (DateTime.now().difference(startTime) > timeout) {
+          throw AdbStreamException(
+              'Timeout waiting for end byte $endByte');
+        }
+
+        await Future.delayed(Duration(milliseconds: 10));
+
+        if (_isClosed) {
+          throw AdbStreamClosed();
         }
       }
-      // 当前数据块中没有结束符，继续读取
-      buffer.add(data);
-    }
 
-    throw AdbStreamException(
-        'Stream closed before end byte $endByte was found');
+      await subscription.cancel();
+      return buffer.toBytes();
+    } catch (e) {
+      await subscription.cancel();
+      if (e is AdbStreamException || e is AdbStreamClosed) {
+        rethrow;
+      }
+      throw AdbStreamException('Failed to read until end byte: $e');
+    }
   }
 
   /// 关闭流
@@ -195,31 +282,34 @@ class AdbStream {
   void _startDataListening() {
     messageQueue.startListening(localId);
 
-    // 设置消息监听器
-    // 注意：这里需要修改AdbMessageQueue以支持监听器模式
-    // 暂时通过轮询方式处理
-    Timer.periodic(const Duration(milliseconds: 10), (timer) async {
-      if (_isClosed) {
-        timer.cancel();
-        return;
-      }
+    // 启动异步数据接收循环
+    _receiveDataLoop();
+  }
 
+  /// 数据接收循环
+  void _receiveDataLoop() async {
+    while (!_isClosed) {
       try {
-        final message = await messageQueue.take(localId, AdbProtocol.cmdWrte);
-        if (message.payload != null) {
+        // 等待数据消息，使用较短超时避免阻塞
+        final message = await messageQueue.take(localId, AdbProtocol.cmdWrte)
+            .timeout(Duration(milliseconds: 100));
+
+        if (message.payload != null && !_dataController.isClosed) {
           _dataController.add(message.payload!);
         }
       } catch (e) {
-        // 没有数据或发生错误
-        if (e is! TimeoutException) {
-          // 非超时错误，可能是流关闭
-          if (!_dataController.isClosed) {
-            _dataController.addError(e);
-          }
-          timer.cancel();
+        // 超时是正常的，继续循环
+        if (e is TimeoutException) {
+          continue;
         }
+
+        // 其他错误需要处理
+        if (!_isClosed && !_dataController.isClosed) {
+          _dataController.addError(e);
+        }
+        break;
       }
-    });
+    }
   }
 
   /// 等待OKAY确认

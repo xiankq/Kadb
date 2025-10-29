@@ -39,8 +39,8 @@ class AndroidPubkey {
     final nWords = _extractWords(n);
     final rrWords = _extractWords(rSquared);
 
-    // 构建输出缓冲区 - 确保足够大
-    final buffer = ByteData(keyLengthWords * 4 * 2 + 8 + 4); // 额外增加4字节
+    // 构建输出缓冲区 - 精确大小
+    final buffer = ByteData(keyLengthWords * 4 * 2 + 8); // nWords + rrWords + len + n0inv + exponent
     var offset = 0;
 
     // len
@@ -65,9 +65,10 @@ class AndroidPubkey {
 
     // exponent - 使用setUint32而不是setInt32避免符号问题
     buffer.setUint32(offset, e.toInt(), Endian.little);
+    offset += 4;
 
-    // 只返回使用的字节
-    return buffer.buffer.asUint8List(0, offset + 4);
+    // 只返回使用的字节 - 确保精确大小
+    return buffer.buffer.asUint8List(0, offset);
   }
 
   /// 从大整数中提取指定位置的32位字
@@ -114,13 +115,19 @@ class AndroidPubkey {
 
   /// 验证公钥格式
   static bool verifyPublicKeyFormat(Uint8List keyData) {
-    if (keyData.length != keyLengthBytes * 2 + 8) {
+    final expectedLength = keyLengthWords * 4 * 2 + 8; // 精确计算：nWords + rrWords + len + n0inv + exponent
+    if (keyData.length != expectedLength) {
+      print('公钥长度错误: 期望$expectedLength字节，实际${keyData.length}字节');
       return false;
     }
 
-    final data = ByteData.sublistView(keyData);
-    final len = data.getUint32(0, Endian.little);
-
-    return len == keyLengthWords;
+    try {
+      final data = ByteData.sublistView(keyData);
+      final len = data.getUint32(0, Endian.little);
+      return len == keyLengthWords;
+    } catch (e) {
+      print('公钥格式验证错误: $e');
+      return false;
+    }
   }
 }

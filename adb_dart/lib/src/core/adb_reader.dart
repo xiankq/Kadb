@@ -12,9 +12,11 @@ import '../exception/adb_exceptions.dart';
 /// ADB消息读取器
 class AdbReader {
   final StreamController<AdbMessage> _messageController =
-      StreamController<AdbMessage>();
+      StreamController<AdbMessage>.broadcast();
   final Socket _socket;
   final _buffer = BytesBuilder();
+  final _dataAvailable = StreamController<void>.broadcast();
+  bool _isClosed = false;
 
   AdbReader(this._socket) {
     _socket.listen(_onData, onError: _onError, onDone: _onDone);
@@ -83,21 +85,38 @@ class AdbReader {
 
   /// 等待数据到达
   Future<void> _waitForData() async {
-    final completer = Completer<void>();
-    late StreamSubscription subscription;
+    if (_isClosed) return;
 
-    subscription = _messageController.stream.listen((_) {
-      completer.complete();
-      subscription.cancel();
-    });
+    // 简单的轮询方式，检查数据是否可用
+    const maxWaitTime = Duration(seconds: 10);
+    const checkInterval = Duration(milliseconds: 10);
+    final startTime = DateTime.now();
+    int lastBufferSize = _buffer.length;
 
-    await completer.future;
+    while (DateTime.now().difference(startTime) < maxWaitTime) {
+      if (_buffer.length > lastBufferSize) {
+        // 有新数据到达，继续处理
+        return;
+      }
+
+      if (_buffer.length >= adbMessageHeaderSize) {
+        // 数据已足够
+        return;
+      }
+
+      await Future.delayed(checkInterval);
+    }
+
+    throw TimeoutException('等待数据超时 - 设备可能无响应 (等待了${maxWaitTime.inSeconds}秒)');
   }
 
   /// 处理接收到的数据
   void _onData(Uint8List data) {
     _buffer.add(data);
-    _messageController.add(_buildDummyMessage());
+    // 通知等待者数据已到达
+    if (!_dataAvailable.isClosed) {
+      _dataAvailable.add(null);
+    }
   }
 
   /// 处理错误
@@ -107,23 +126,15 @@ class AdbReader {
 
   /// 处理连接关闭
   void _onDone() {
+    _isClosed = true;
+    _dataAvailable.close();
     _messageController.close();
-  }
-
-  /// 构建虚拟消息（用于触发读取）
-  AdbMessage _buildDummyMessage() {
-    return AdbMessage(
-      command: 0,
-      arg0: 0,
-      arg1: 0,
-      dataLength: _buffer.length,
-      dataCrc32: 0,
-      magic: 0,
-    );
   }
 
   /// 关闭读取器
   void close() {
+    _isClosed = true;
+    _dataAvailable.close();
     _messageController.close();
   }
 }

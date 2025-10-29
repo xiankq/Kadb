@@ -86,6 +86,9 @@ class AdbConnection {
       _writer = AdbWriter(_socket!);
       _messageQueue = AdbMessageQueue(_reader!);
 
+      // 启动消息队列
+      _messageQueue!.start();
+
       // 发送连接请求
       await _writer!.writeConnect();
 
@@ -102,22 +105,33 @@ class AdbConnection {
 
   /// 处理连接响应
   Future<void> _handleConnectionResponse() async {
+    print('等待ADB连接响应...');
+    int responseCount = 0;
+
     while (true) {
+      responseCount++;
+      print('等待响应 #$responseCount...');
+
       final response = await _reader!.readMessage();
+      print('收到响应: ${AdbProtocol.getCommandName(response.command)} (arg0=${response.arg0}, arg1=${response.arg1})');
 
       switch (response.command) {
         case AdbProtocol.cmdStls:
           // TLS加密请求
+          print('收到TLS请求');
           await _handleTlsRequest(response);
           break;
 
         case AdbProtocol.cmdAuth:
           // 认证请求
+          print('收到认证请求');
           await _handleAuthRequest(response);
+          // 认证后需要继续等待响应（可能是CNXN或另一个AUTH）
           break;
 
         case AdbProtocol.cmdCnxn:
           // 连接确认
+          print('收到连接确认');
           await _handleConnectionConfirmation(response);
           return;
 
@@ -137,13 +151,66 @@ class AdbConnection {
   /// 处理认证请求
   Future<void> _handleAuthRequest(AdbMessage request) async {
     _state = AdbConnectionState.authenticating;
+    print('收到认证请求: authType=${request.arg0}, payload长度=${request.payload?.length ?? 0}');
 
     if (request.arg0 == AdbProtocol.authTypeToken) {
-      // 使用私钥签名token
-      final signature = keyPair.signPayload(request.payload!);
-      await _writer!.writeAuth(AdbProtocol.authTypeSignature, signature);
+      // ADB标准认证流程：首先发送公钥
+      print('发送RSA公钥进行认证...');
+      final publicKey = keyPair.getAdbPublicKey();
+      await _writer!.writeAuth(AdbProtocol.authTypeRsaPublic, publicKey);
+      print('RSA公钥已发送，等待设备响应...');
+
+      // 设备会响应：
+      // 1. CNXN (如果公钥已授权)
+      // 2. 新的AUTH token (如果公钥未知，需要签名认证)
+      final deviceResponse = await _reader!.readMessage().timeout(
+        Duration(seconds: 5),
+        onTimeout: () {
+          throw TimeoutException('等待设备认证响应超时');
+        },
+      );
+
+      print('收到设备认证响应: ${AdbProtocol.getCommandName(deviceResponse.command)}');
+
+      if (deviceResponse.command == AdbProtocol.cmdCnxn) {
+        // 公钥已授权，连接成功！
+        print('✅ 公钥认证成功，连接已建立！');
+        await _handleConnectionConfirmation(deviceResponse);
+        return;
+      }
+
+      if (deviceResponse.command == AdbProtocol.cmdAuth &&
+          deviceResponse.arg0 == AdbProtocol.authTypeToken) {
+        // 设备不认识这个公钥，需要提供签名
+        print('设备需要签名认证，正在生成签名...');
+
+        // 使用私钥对新的token进行签名
+        final signature = keyPair.signPayload(deviceResponse.payload!);
+        print('生成RSA签名: ${signature.length} 字节');
+
+        // 发送签名
+        await _writer!.writeAuth(AdbProtocol.authTypeSignature, signature);
+        print('RSA签名已发送，等待最终确认...');
+
+        // 等待最终连接确认
+        final finalResponse = await _reader!.readMessage().timeout(
+          Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('等待最终连接确认超时');
+          },
+        );
+
+        if (finalResponse.command == AdbProtocol.cmdCnxn) {
+          print('✅ 签名认证成功，连接已建立！');
+          await _handleConnectionConfirmation(finalResponse);
+        } else {
+          throw AdbAuthException('认证失败，收到意外响应: ${AdbProtocol.getCommandName(finalResponse.command)}');
+        }
+      } else {
+        throw AdbAuthException('认证收到意外响应: ${AdbProtocol.getCommandName(deviceResponse.command)}');
+      }
     } else {
-      throw AdbAuthException('Unsupported auth type: ${request.arg0}');
+      throw AdbAuthException('不支持的认证类型: ${request.arg0}');
     }
   }
 
@@ -156,8 +223,9 @@ class AdbConnection {
     final connectionString = String.fromCharCodes(confirmation.payload!);
     _parseConnectionString(connectionString);
 
-    print('ADB连接已建立: 版本=$_version, 最大载荷=$_maxPayloadSize');
-    print('设备信息: $connectionString');
+    print('✅ ADB连接已建立: 版本=$_version, 最大载荷=$_maxPayloadSize');
+    print('✅ 设备信息: $connectionString');
+    print('✅ 支持特性: ${_supportedFeatures.join(', ')}');
   }
 
   /// 解析连接字符串

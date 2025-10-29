@@ -58,7 +58,15 @@ class AdbMessageQueue {
 
   /// 开始监听指定本地ID的消息
   void startListening(int localId) {
-    // 无需特殊处理，消息循环会自动分发
+    // 为数据流消息添加监听器
+    _listeners[localId] = (message) {
+      // 数据消息直接处理，不需要等待
+      if (message.command == AdbProtocol.cmdWrte && message.payload != null) {
+        // 这里应该调用流的数据处理器
+        // 暂时存储在队列中供流读取
+        _messageQueue.add(message);
+      }
+    };
   }
 
   /// 停止监听指定本地ID的消息
@@ -85,11 +93,12 @@ class AdbMessageQueue {
 
     try {
       return await completer.future.timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 10), // 增加超时时间用于诊断
         onTimeout: () {
           _pendingMessages.remove(localId);
-          throw AdbStreamException(
-              'Timeout waiting for command ${AdbProtocol.getCommandName(expectedCommand)} on localId $localId');
+          throw TimeoutException(
+              '等待命令超时: ${AdbProtocol.getCommandName(expectedCommand)} '
+              '本地ID: $localId - 设备可能无响应或协议不匹配');
         },
       );
     } catch (e) {
