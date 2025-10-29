@@ -3,6 +3,8 @@
  * 包含各种ADB操作可能抛出的异常
  */
 
+library adb_exceptions;
+
 /// ADB基础异常
 class AdbException implements Exception {
   final String message;
@@ -52,4 +54,9 @@ class AdbStreamClosed extends AdbException {
 /// TLS异常
 class TlsException extends AdbException {
   TlsException(String message, [dynamic cause]) : super(message, cause);
+}
+
+/// 文件操作异常
+class AdbFileException extends AdbException {
+  AdbFileException(String message, [dynamic cause]) : super(message, cause);
 }
