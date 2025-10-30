@@ -18,18 +18,25 @@ class AdbWriter {
   /// 写入消息
   Future<void> writeMessage(AdbMessage message) async {
     try {
+      print('DEBUG: 写入消息 - 命令: ${message.command} (${message.command.toRadixString(16)}), 载荷长度: ${message.payload?.length ?? 0}');
+
       // 发送消息头部
       final header = message.serializeHeader();
+      print('DEBUG: 头部长度: ${header.length}');
       _socket.add(header);
 
       // 发送数据载荷（如果有）
       if (message.payload != null && message.payload!.isNotEmpty) {
+        print('DEBUG: 发送载荷，长度: ${message.payload!.length}');
         _socket.add(message.payload!);
       }
 
       // 刷新数据
+      print('DEBUG: 刷新socket');
       await _socket.flush();
+      print('DEBUG: 消息写入完成');
     } catch (e) {
+      print('DEBUG: 消息写入失败: $e');
       throw AdbConnectionException('Failed to write message: $e');
     }
   }

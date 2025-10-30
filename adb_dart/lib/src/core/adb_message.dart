@@ -44,28 +44,67 @@ class AdbMessage {
           'Invalid header size: ${header.length}, expected: $adbMessageHeaderSize');
     }
 
+    // 边界检查：确保header足够长
+    if (header.length < 24) {
+      throw ArgumentError('Header too short: ${header.length} bytes');
+    }
+
     final data = ByteData.sublistView(header);
-    return AdbMessage(
-      command: data.getUint32(0, Endian.little),
-      arg0: data.getUint32(4, Endian.little),
-      arg1: data.getUint32(8, Endian.little),
-      dataLength: data.getUint32(12, Endian.little),
-      dataCrc32: data.getUint32(16, Endian.little),
-      magic: data.getUint32(20, Endian.little),
-    );
+
+    // 安全地读取所有字段
+    try {
+      return AdbMessage(
+        command: data.getUint32(0, Endian.little),
+        arg0: data.getUint32(4, Endian.little),
+        arg1: data.getUint32(8, Endian.little),
+        dataLength: data.getUint32(12, Endian.little),
+        dataCrc32: data.getUint32(16, Endian.little),
+        magic: data.getUint32(20, Endian.little),
+      );
+    } catch (e) {
+      throw ArgumentError('Failed to parse header: $e');
+    }
   }
 
   /// 序列化消息头部到字节数组
   Uint8List serializeHeader() {
+    print('DEBUG: 序列化头部 - 命令: $command (${command.toRadixString(16)}), arg0: $arg0, arg1: $arg1, dataLength: $dataLength, dataCrc32: $dataCrc32, magic: $magic');
+
     final buffer = Uint8List(adbMessageHeaderSize);
+
+    // 边界检查：确保所有值都在有效范围内
+    if (command < 0 || command > 0xFFFFFFFF) {
+      throw ArgumentError('Invalid command value: $command');
+    }
+    if (arg0 < 0 || arg0 > 0xFFFFFFFF) {
+      throw ArgumentError('Invalid arg0 value: $arg0');
+    }
+    if (arg1 < 0 || arg1 > 0xFFFFFFFF) {
+      throw ArgumentError('Invalid arg1 value: $arg1');
+    }
+    if (dataLength < 0 || dataLength > 0xFFFFFFFF) {
+      throw ArgumentError('Invalid dataLength value: $dataLength');
+    }
+    if (dataCrc32 < 0 || dataCrc32 > 0xFFFFFFFF) {
+      throw ArgumentError('Invalid dataCrc32 value: $dataCrc32');
+    }
+    if (magic < 0 || magic > 0xFFFFFFFF) {
+      throw ArgumentError('Invalid magic value: $magic');
+    }
+
     final data = ByteData.sublistView(buffer);
 
-    data.setUint32(0, command, Endian.little);
-    data.setUint32(4, arg0, Endian.little);
-    data.setUint32(8, arg1, Endian.little);
-    data.setUint32(12, dataLength, Endian.little);
-    data.setUint32(16, dataCrc32, Endian.little);
-    data.setUint32(20, magic, Endian.little);
+    try {
+      data.setUint32(0, command, Endian.little);
+      data.setUint32(4, arg0, Endian.little);
+      data.setUint32(8, arg1, Endian.little);
+      data.setUint32(12, dataLength, Endian.little);
+      data.setUint32(16, dataCrc32, Endian.little);
+      data.setUint32(20, magic, Endian.little);
+    } catch (e) {
+      print('DEBUG: 序列化头部失败: $e');
+      rethrow;
+    }
 
     return buffer;
   }
@@ -91,7 +130,8 @@ class AdbMessage {
     for (int i = 0; i < data.length; i++) {
       checksum += data[i] & 0xFF;
     }
-    return checksum;
+    // 确保校验和是32位无符号整数
+    return checksum & 0xFFFFFFFF;
   }
 
   /// 创建CONNECT消息

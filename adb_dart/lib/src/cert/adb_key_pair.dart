@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'dart:math';
 import 'dart:convert';
 import 'package:pointycastle/pointycastle.dart' as pc;
+import 'package:pointycastle/asymmetric/rsa.dart';
 import 'package:convert/convert.dart';
 import 'package:basic_utils/basic_utils.dart';
 import 'package:asn1lib/asn1lib.dart';
@@ -24,24 +25,108 @@ class AdbKeyPair {
     required this.certificate,
   });
 
-  /// 使用私钥对数据进行签名
+  /// 使用私钥对数据进行签名（兼容Kadb：RSA/ECB/NoPadding + 特殊填充）
   Uint8List signPayload(Uint8List data) {
     try {
-      // 创建签名器 - 使用SHA-256/RSA (与证书保持一致)
-      final signer = pc.Signer('SHA-256/RSA')
-        ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey));
+      // Kadb使用RSA/ECB/NoPadding + 特殊签名填充
+      // 而不是SHA-256/RSA签名
+      print('DEBUG: 使用RSA/ECB/NoPadding签名算法（对标Kadb）');
 
-      // 对数据进行签名
-      final signature = signer.generateSignature(data) as pc.RSASignature;
-      return signature.bytes; // 返回签名的字节数据
+      // 创建RSA处理器（无填充模式）
+      final rsaEngine = RSAEngine();
+      final privateKeyParam = pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey);
+      rsaEngine.init(true, privateKeyParam); // 加密模式用于签名
+
+      // Kadb的签名填充（固定格式）
+      final signaturePadding = Uint8List.fromList([
+        0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
+        0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00,
+        0x04, 0x14
+      ]);
+
+      // 构建待加密数据：填充 + 数据
+      final paddedData = BytesBuilder();
+      paddedData.add(signaturePadding);
+      paddedData.add(data);
+
+      // 使用RSA加密（无填充）生成签名
+      final input = paddedData.toBytes();
+      final signature = rsaEngine.process(input);
+
+      print('DEBUG: 签名生成完成，长度: ${signature.length} 字节');
+      return signature;
     } catch (e) {
-      throw Exception('Failed to sign payload: $e');
+      throw Exception('RSA签名失败: $e');
     }
   }
 
-  /// 获取公钥的ADB格式
+  /// 获取公钥的ADB格式（备用实现）
   Uint8List getAdbPublicKey() {
-    return AndroidPubkey.convertRsaPublicKey(publicKey);
+    try {
+      final adbKey = AndroidPubkey.convertRsaPublicKey(publicKey);
+      print('DEBUG: ADB公钥生成完成，长度: ${adbKey.length} 字节');
+      return adbKey;
+    } catch (e) {
+      print('DEBUG: AndroidPubkey转换失败: $e');
+      print('DEBUG: 使用备用公钥格式');
+
+      // 备用方案：使用简单的RSA公钥格式
+      // 这在某些设备上可能也能工作
+      final publicKeyDer = _exportPublicKeyDer(publicKey);
+      print('DEBUG: 备用公钥格式，长度: ${publicKeyDer.length} 字节');
+      return publicKeyDer;
+    }
+  }
+
+  /// 导出公钥为DER格式（备用方案）
+  Uint8List _exportPublicKeyDer(pc.RSAPublicKey publicKey) {
+    try {
+      // 简单的DER编码：模数 + 指数
+      final n = publicKey.modulus!;
+      final e = publicKey.exponent!;
+
+      // 转换为字节数组（大端序）
+      final nBytes = _bigIntToBytes(n);
+      final eBytes = _bigIntToBytes(e);
+
+      // 组合成简单的格式
+      final result = BytesBuilder();
+      result.addByte((nBytes.length >> 8) & 0xFF); // 模数长度高字节
+      result.addByte(nBytes.length & 0xFF);       // 模数长度低字节
+      result.add(nBytes);
+      result.add(eBytes);
+
+      return result.toBytes();
+    } catch (e) {
+      throw Exception('DER格式导出失败: $e');
+    }
+  }
+
+  /// 大整数转字节数组（大端序，无符号）
+  Uint8List _bigIntToBytes(BigInt value) {
+    if (value == BigInt.zero) return Uint8List(1);
+
+    // 计算需要的字节数
+    final byteCount = (value.bitLength + 7) ~/ 8;
+    final result = Uint8List(byteCount);
+
+    // 从大端序填充
+    BigInt temp = value;
+    for (int i = byteCount - 1; i >= 0; i--) {
+      result[i] = (temp & BigInt.from(0xFF)).toInt();
+      temp = temp >> 8;
+    }
+
+    return result;
   }
 
   /// 生成新的密钥对

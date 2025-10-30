@@ -12,7 +12,6 @@ import '../exception/adb_exceptions.dart';
 
 /// SSL工具类
 class SslUtils {
-  static bool _customConscrypt = false; // 标记是否使用自定义Conscrypt提供程序
   static SecurityContext? _sslContext;
 
   /// 创建客户端SSL引擎
@@ -39,11 +38,9 @@ class SslUtils {
       _sslContext = SecurityContext();
 
       // 在ADB配对中，通常不需要设置客户端证书
-      // 如果需要设置，可以导出PEM格式并临时保存到文件
-      // 这里简化处理，不设置具体证书
-      print('SSL上下文创建成功（简化处理，未设置具体证书）');
+      // 简化处理，仅创建基础SSL上下文
+      print('SSL上下文创建成功（ADB配对模式，简化配置）');
 
-      _customConscrypt = false;
       return _sslContext!;
     } catch (e) {
       throw TlsException('无法创建SSL上下文: $e');

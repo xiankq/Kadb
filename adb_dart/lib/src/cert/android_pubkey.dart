@@ -25,9 +25,13 @@ class AndroidPubkey {
     final n = publicKey.modulus!;
     final e = publicKey.exponent!;
 
+    print('DEBUG AndroidPubkey: 模数长度: ${n.bitLength} bits, 指数: $e');
+
     // 计算n0inv = -1 / n[0] mod 2^32
     final n0 = _extractWord(n, 0);
+    print('DEBUG AndroidPubkey: n0 = $n0');
     final n0inv = _modularInverse(n0, 0x100000000);
+    print('DEBUG AndroidPubkey: n0inv = $n0inv');
 
     // 计算R = 2^(keyLengthWords * 32)
     final r = BigInt.from(2).pow(keyLengthWords * 32);
@@ -39,6 +43,8 @@ class AndroidPubkey {
     final nWords = _extractWords(n);
     final rrWords = _extractWords(rSquared);
 
+    print('DEBUG AndroidPubkey: nWords长度: ${nWords.length}, rrWords长度: ${rrWords.length}');
+
     // 构建输出缓冲区 - 精确大小
     final buffer = ByteData(keyLengthWords * 4 * 2 + 8); // nWords + rrWords + len + n0inv + exponent
     var offset = 0;
@@ -47,8 +53,10 @@ class AndroidPubkey {
     buffer.setUint32(offset, keyLengthWords, Endian.little);
     offset += 4;
 
-    // n0inv
-    buffer.setUint32(offset, (-n0inv) & 0xFFFFFFFF, Endian.little);
+    // n0inv - 修复：确保使用正确的负数表示
+    final n0invValue = (-n0inv) & 0xFFFFFFFF;
+    print('DEBUG AndroidPubkey: 设置n0inv值: $n0invValue (原始: $n0inv)');
+    buffer.setUint32(offset, n0invValue, Endian.little);
     offset += 4;
 
     // n[]

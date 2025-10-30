@@ -24,6 +24,8 @@ class AdbReader {
 
   /// 读取一个消息
   Future<AdbMessage> readMessage() async {
+    print('DEBUG: 开始读取消息，当前缓冲区长度: ${_buffer.length}');
+
     // 等待完整的头部
     while (_buffer.length < adbMessageHeaderSize) {
       await _waitForData();
@@ -31,8 +33,16 @@ class AdbReader {
 
     // 解析头部
     final headerData = _buffer.toBytes();
+    print('DEBUG: 头部数据长度: ${headerData.length}');
+
+    if (headerData.length < adbMessageHeaderSize) {
+      throw AdbProtocolException('Insufficient data for header: ${headerData.length} < $adbMessageHeaderSize');
+    }
+
     final header = headerData.sublist(0, adbMessageHeaderSize);
     final message = AdbMessage.fromHeader(header);
+
+    print('DEBUG: 解析头部 - 命令: ${message.command.toRadixString(16)}, 数据长度: ${message.dataLength}');
 
     // 验证消息
     if (!message.isValid()) {
@@ -41,12 +51,22 @@ class AdbReader {
 
     // 如果有数据载荷，继续读取
     if (message.dataLength > 0) {
+      print('DEBUG: 有载荷，需要读取 ${message.dataLength} 字节');
       while (_buffer.length < adbMessageHeaderSize + message.dataLength) {
         await _waitForData();
       }
 
       // 提取数据载荷
       final allData = _buffer.toBytes();
+      print('DEBUG: 总数据长度: ${allData.length}, 需要载荷长度: ${message.dataLength}');
+
+      // 边界检查：确保数据足够
+      if (allData.length < adbMessageHeaderSize + message.dataLength) {
+        throw AdbProtocolException(
+          'Insufficient data for payload: expected ${adbMessageHeaderSize + message.dataLength}, got ${allData.length}'
+        );
+      }
+
       final payload = allData.sublist(
           adbMessageHeaderSize, adbMessageHeaderSize + message.dataLength);
 
@@ -61,6 +81,8 @@ class AdbReader {
         payload: payload,
       );
 
+      print('DEBUG: 载荷读取完成，长度: ${payload.length}');
+
       // 验证校验和（Kadb使用简单校验和，非CRC32）
       if (!fullMessage.verifyChecksum()) {
         throw AdbProtocolException('Checksum verification failed');
@@ -74,11 +96,13 @@ class AdbReader {
 
       return fullMessage;
     } else {
+      print('DEBUG: 无载荷');
       // 没有数据载荷，直接移除头部
       _buffer.clear();
       if (headerData.length > adbMessageHeaderSize) {
         _buffer.add(headerData.sublist(adbMessageHeaderSize));
       }
+
       return message;
     }
   }
@@ -88,7 +112,7 @@ class AdbReader {
     if (_isClosed) return;
 
     // 简单的轮询方式，检查数据是否可用
-    const maxWaitTime = Duration(seconds: 10);
+    const maxWaitTime = Duration(seconds: 30); // 增加超时时间到30秒
     const checkInterval = Duration(milliseconds: 10);
     final startTime = DateTime.now();
     int lastBufferSize = _buffer.length;
@@ -112,6 +136,7 @@ class AdbReader {
 
   /// 处理接收到的数据
   void _onData(Uint8List data) {
+    print('DEBUG: 收到数据，长度: ${data.length}');
     _buffer.add(data);
     // 通知等待者数据已到达
     if (!_dataAvailable.isClosed) {
