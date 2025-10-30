@@ -39,7 +39,7 @@ class AdbWriter {
     final message = AdbMessage.connect(
       adbVersion,
       adbMaxPayload,
-      'host::${getDefaultDeviceName()}',
+      'host::${getDefaultDeviceName()}\u0000',
     );
     await writeMessage(message);
   }

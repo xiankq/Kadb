@@ -9,7 +9,7 @@ void main() async {
 
   // 创建ADB客户端实例
   final adb = AdbDart(
-    host: '192.168.2.148',
+    host: '100.123.66.1',
     port: 5555,
   );
 

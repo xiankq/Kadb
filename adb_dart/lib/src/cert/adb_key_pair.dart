@@ -7,7 +7,7 @@ import 'dart:math';
 import 'dart:convert';
 import 'package:pointycastle/pointycastle.dart' as pc;
 import 'package:convert/convert.dart';
-import 'package:x509_plus/x509.dart';
+import 'package:basic_utils/basic_utils.dart';
 import 'package:asn1lib/asn1lib.dart';
 import '../utils/crc32.dart';
 import 'android_pubkey.dart';
@@ -89,76 +89,42 @@ class AdbKeyPair {
     required String commonName,
     required Duration validityPeriod,
   }) {
-    // 实现真实的X.509证书生成
     try {
       final now = DateTime.now();
       final notAfter = now.add(validityPeriod);
       final serialNumber = Random.secure().nextInt(1 << 31); // 避免负数
 
-      // 转换PointCastle公钥为crypto_keys格式
-      final rsaPublicKey = RsaPublicKey(
-        modulus: publicKey.modulus!,
-        exponent: publicKey.exponent!,
+      // 创建CSR (Certificate Signing Request) first to use with basic_utils
+      // Create attributes for the certificate
+      final attributes = {
+        'CN': commonName, // commonName
+        'OU': 'adb_dart', // organizationalUnitName
+        'O': 'adb_dart', // organizationName
+        'L': 'adb_dart', // localityName
+        'ST': 'adb_dart', // stateOrProvinceName
+        'C': 'CN', // countryName
+      };
+
+      // Generate CSR using basic_utils
+      final csr = X509Utils.generateRsaCsrPem(attributes, privateKey, publicKey);
+
+      // Generate self-signed certificate using the CSR
+      final certPem = X509Utils.generateSelfSignedCertificate(
+        privateKey,
+        csr,
+        (validityPeriod.inDays).toInt(),
+        serialNumber: serialNumber.toString(),
+        notBefore: now.subtract(Duration(days: 1)),
       );
 
-      // 构建完整的证书主题（对标Kadb）
-      final subject = Name([
-        {ObjectIdentifier([2, 5, 4, 3]): commonName}, // commonName
-        {ObjectIdentifier([2, 5, 4, 11]): 'adb_dart'}, // organizationalUnitName
-        {ObjectIdentifier([2, 5, 4, 10]): 'adb_dart'}, // organizationName
-        {ObjectIdentifier([2, 5, 4, 7]): 'adb_dart'}, // localityName
-        {ObjectIdentifier([2, 5, 4, 8]): 'adb_dart'}, // stateOrProvinceName
-        {ObjectIdentifier([2, 5, 4, 6]): 'CN'}, // countryName
-      ]);
-
-      // 创建算法标识符
-      final rsaEncryptionOid = ObjectIdentifier([1, 2, 840, 113549, 1, 1, 1]);
-      final sha256WithRSAEncryptionOid = ObjectIdentifier([1, 2, 840, 113549, 1, 1, 11]);
-
-      // 创建TbsCertificate（待签名证书）
-      final tbsCertificate = TbsCertificate(
-        version: 2, // X.509 v3 (版本号从0开始: 0=v1, 1=v2, 2=v3)
-        serialNumber: serialNumber,
-        signature: AlgorithmIdentifier(sha256WithRSAEncryptionOid, null),
-        issuer: subject, // 自签名证书，颁发者和主题相同
-        validity: Validity(
-          notBefore: now.subtract(Duration(days: 1)).toUtc(), // 提前一天生效
-          notAfter: notAfter.toUtc(),
-        ),
-        subject: subject,
-        subjectPublicKeyInfo: SubjectPublicKeyInfo(
-          AlgorithmIdentifier(rsaEncryptionOid, null),
-          rsaPublicKey,
-        ),
-      );
-
-      // 序列化TBSCertificate进行签名
-      final tbsBytes = tbsCertificate.toAsn1().encodedBytes;
-
-      // 使用私钥进行真实签名（SHA-256 + RSA）
-      final signer = pc.Signer('SHA-256/RSA')
-        ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey));
-
-      final signature = signer.generateSignature(tbsBytes) as pc.RSASignature;
-
-      // 创建完整的X.509证书
-      final certificate = X509Certificate(
-        tbsCertificate,
-        AlgorithmIdentifier(sha256WithRSAEncryptionOid, null),
-        signature.bytes,
-      );
-
-      // 序列化证书为DER格式
-      final certDer = certificate.toAsn1().encodedBytes;
-
-      // 转换为PEM格式以便存储和使用
-      final certPem = _createCertificatePem(certDer);
+      // Convert PEM to DER bytes for consistency
+      final certDer = CryptoUtils.getBytesFromPEMString(certPem);
 
       print('X.509 certificate generated successfully:');
       print('  Subject: CN=$commonName');
       print('  Serial Number: $serialNumber');
-      print('  Valid From: ${tbsCertificate.validity?.notBefore}');
-      print('  Valid Until: ${tbsCertificate.validity?.notAfter}');
+      print('  Valid From: ${now.subtract(Duration(days: 1)).toUtc()}');
+      print('  Valid Until: $notAfter');
       print('  Signature Algorithm: SHA-256 with RSA');
       print('  Certificate DER size: ${certDer.length} bytes');
       print('  Certificate PEM size: ${certPem.length} characters');
@@ -169,123 +135,47 @@ class AdbKeyPair {
     }
   }
 
-  /// 创建PEM格式的证书
-  static String _createCertificatePem(List<int> certDer) {
-    final buffer = StringBuffer();
-    buffer.writeln('-----BEGIN CERTIFICATE-----');
-    final base64Str = base64.encode(certDer);
-    // 每64字符换行
-    for (var i = 0; i < base64Str.length; i += 64) {
-      buffer.writeln(base64Str.substring(i,
-          i + 64 > base64Str.length ? base64Str.length : i + 64));
-    }
-    buffer.writeln('-----END CERTIFICATE-----');
-    return buffer.toString();
-  }
-
   /// 从PEM格式加载密钥对
   static AdbKeyPair fromPem(String privateKeyPem, String publicKeyPem) {
     try {
-      // 解析PEM格式的公钥
-      final publicKeyInfos = parsePem(publicKeyPem);
-      if (publicKeyInfos.isEmpty) {
-        throw Exception('未找到公钥');
-      }
+      // 解析PEM格式的公钥为PointCastle格式
+      final pcPublicKey = CryptoUtils.rsaPublicKeyFromPem(publicKeyPem);
 
-      final publicKeyInfo = publicKeyInfos.first as SubjectPublicKeyInfo;
-      final cryptoPublicKey = publicKeyInfo.subjectPublicKey as RsaPublicKey;
-
-      // 转换crypto_keys公钥为PointCastle格式
-      final pcPublicKey = pc.RSAPublicKey(
-        cryptoPublicKey.modulus,
-        cryptoPublicKey.exponent,
-      );
-
-      // 解析PEM格式的私钥
-      final privateKeyInfos = parsePem(privateKeyPem);
-      if (privateKeyInfos.isEmpty) {
-        throw Exception('未找到私钥');
-      }
-
-      final privateKeyInfo = privateKeyInfos.first as PrivateKeyInfo;
-      final cryptoPrivateKey =
-          privateKeyInfo.keyPair.privateKey as RsaPrivateKey;
-
-      // 转换crypto_keys私钥为PointCastle格式
-      final pcPrivateKey = pc.RSAPrivateKey(
-        cryptoPrivateKey.modulus,
-        cryptoPrivateKey.privateExponent,
-        cryptoPrivateKey.firstPrimeFactor,
-        cryptoPrivateKey.secondPrimeFactor,
-      );
+      // 解析PEM格式的私钥为PointCastle格式
+      final pcPrivateKey = CryptoUtils.rsaPrivateKeyFromPem(privateKeyPem);
 
       // 生成真实的X.509证书（对标Kadb）
       final now = DateTime.now();
       final validityPeriod = const Duration(days: 365);
 
-      // 构建完整的证书主题（对标Kadb）
-      final subject = Name([
-        {ObjectIdentifier([2, 5, 4, 3]): 'pem_imported'}, // commonName
-        {ObjectIdentifier([2, 5, 4, 11]): 'adb_dart'}, // organizationalUnitName
-        {ObjectIdentifier([2, 5, 4, 10]): 'adb_dart'}, // organizationName
-        {ObjectIdentifier([2, 5, 4, 7]): 'adb_dart'}, // localityName
-        {ObjectIdentifier([2, 5, 4, 8]): 'adb_dart'}, // stateOrProvinceName
-        {ObjectIdentifier([2, 5, 4, 6]): 'CN'}, // countryName
-      ]);
+      // 创建CSR (Certificate Signing Request) first to use with basic_utils
+      // Create attributes for the certificate
+      final attributes = {
+        'CN': 'pem_imported', // commonName
+        'OU': 'adb_dart', // organizationalUnitName
+        'O': 'adb_dart', // organizationName
+        'L': 'adb_dart', // localityName
+        'ST': 'adb_dart', // stateOrProvinceName
+        'C': 'CN', // countryName
+      };
 
-      // 创建算法标识符
-      final rsaEncryptionOid = ObjectIdentifier([1, 2, 840, 113549, 1, 1, 1]);
-      final sha256WithRSAEncryptionOid = ObjectIdentifier([1, 2, 840, 113549, 1, 1, 11]);
+      // Generate CSR using basic_utils
+      final csr = X509Utils.generateRsaCsrPem(attributes, pcPrivateKey, pcPublicKey);
 
-      // 创建主题公钥信息
-      final subjectPublicKeyInfo = SubjectPublicKeyInfo(
-        AlgorithmIdentifier(rsaEncryptionOid, null),
-        cryptoPublicKey,
+      // Generate self-signed certificate using the CSR
+      final certPem = X509Utils.generateSelfSignedCertificate(
+        pcPrivateKey,
+        csr,
+        validityPeriod.inDays.toInt(),
+        serialNumber: (now.millisecondsSinceEpoch ~/ 1000).toString(),
+        notBefore: now.subtract(Duration(days: 1)),
       );
-
-      // 创建TbsCertificate（待签名证书）
-      final tbsCertificate = TbsCertificate(
-        version: 2, // X.509 v3
-        serialNumber: now.millisecondsSinceEpoch ~/ 1000,
-        signature: AlgorithmIdentifier(sha256WithRSAEncryptionOid, null),
-        issuer: subject, // 自签名证书，颁发者和主题相同
-        validity: Validity(
-          notBefore: now.subtract(Duration(days: 1)).toUtc(), // 提前一天生效
-          notAfter: now.add(validityPeriod).toUtc(),
-        ),
-        subject: subject,
-        subjectPublicKeyInfo: subjectPublicKeyInfo,
-      );
-
-      // 序列化TBSCertificate进行签名
-      final tbsBytes = tbsCertificate.toAsn1().encodedBytes;
-
-      // 使用私钥进行真实签名（SHA-256 + RSA）
-      final signer = pc.Signer('SHA-256/RSA')
-        ..init(true, pc.PrivateKeyParameter<pc.RSAPrivateKey>(pcPrivateKey));
-
-      final signature = signer.generateSignature(tbsBytes) as pc.RSASignature;
-
-      // 创建完整的X.509证书
-      final certificate = X509Certificate(
-        tbsCertificate,
-        AlgorithmIdentifier(sha256WithRSAEncryptionOid, null),
-        signature.bytes,
-      );
-
-      // 序列化证书为DER格式
-      final certDer = certificate.toAsn1().encodedBytes;
-
-      // 转换为PEM格式以便存储和使用
-      final certPem = _createCertificatePem(certDer);
 
       print('X.509 certificate generated from PEM successfully:');
       print('  Subject: CN=pem_imported');
-      print('  Serial Number: ${tbsCertificate.serialNumber}');
-      print('  Valid From: ${tbsCertificate.validity?.notBefore}');
-      print('  Valid Until: ${tbsCertificate.validity?.notAfter}');
+      print('  Valid From: ${now.subtract(Duration(days: 1)).toUtc()}');
+      print('  Valid Until: ${now.add(validityPeriod).toUtc()}');
       print('  Signature Algorithm: SHA-256 with RSA');
-      print('  Certificate DER size: ${certDer.length} bytes');
       print('  Certificate PEM size: ${certPem.length} characters');
 
       return AdbKeyPair(

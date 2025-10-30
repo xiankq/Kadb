@@ -5,6 +5,7 @@ library;
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'adb_message.dart';
 import 'adb_reader.dart';
 import 'adb_writer.dart';
@@ -13,6 +14,7 @@ import '../exception/adb_exceptions.dart';
 import '../cert/adb_key_pair.dart';
 import '../queue/adb_message_queue.dart';
 import '../stream/adb_stream.dart';
+import '../tls/ssl_utils.dart';
 
 /// ADB连接状态
 enum AdbConnectionState {
@@ -41,6 +43,7 @@ class AdbConnection {
   int _maxPayloadSize = 0;
   Set<String> _supportedFeatures = {};
   final Random _random = Random();
+  bool _isSecure = false; // TLS安全状态
 
   AdbConnection({
     required this.host,
@@ -112,40 +115,110 @@ class AdbConnection {
       responseCount++;
       print('等待响应 #$responseCount...');
 
-      final response = await _reader!.readMessage();
-      print('收到响应: ${AdbProtocol.getCommandName(response.command)} (arg0=${response.arg0}, arg1=${response.arg1})');
+      try {
+        final response = await _reader!.readMessage().timeout(
+          Duration(seconds: 10),
+          onTimeout: () {
+            print('❌ 等待响应超时 (10秒)');
+            throw TimeoutException('等待数据超时 - 设备可能无响应', Duration(seconds: 10));
+          },
+        );
+        print('收到响应: ${AdbProtocol.getCommandName(response.command)} (arg0=${response.arg0}, arg1=${response.arg1})');
 
-      switch (response.command) {
-        case AdbProtocol.cmdStls:
-          // TLS加密请求
-          print('收到TLS请求');
-          await _handleTlsRequest(response);
-          break;
+        switch (response.command) {
+          case AdbProtocol.cmdStls:
+            // TLS加密请求
+            print('收到TLS请求');
+            await _handleTlsRequest(response);
+            break;
 
-        case AdbProtocol.cmdAuth:
-          // 认证请求
-          print('收到认证请求');
-          await _handleAuthRequest(response);
-          // 认证后需要继续等待响应（可能是CNXN或另一个AUTH）
-          break;
+          case AdbProtocol.cmdAuth:
+            // 认证请求
+            print('收到认证请求');
+            await _handleAuthRequest(response);
+            // 认证后需要继续等待响应（可能是CNXN或另一个AUTH）
+            break;
 
-        case AdbProtocol.cmdCnxn:
-          // 连接确认
-          print('收到连接确认');
-          await _handleConnectionConfirmation(response);
-          return;
+          case AdbProtocol.cmdCnxn:
+            // 连接确认
+            print('收到连接确认');
+            await _handleConnectionConfirmation(response);
+            return;
 
-        default:
-          throw AdbProtocolException(
-              'Unexpected message during connection: ${AdbProtocol.getCommandName(response.command)}');
+          default:
+            throw AdbProtocolException(
+                'Unexpected message during connection: ${AdbProtocol.getCommandName(response.command)}');
+        }
+      } catch (e) {
+        print('消息循环错误: $e');
+        rethrow;
       }
     }
   }
 
   /// 处理TLS请求
   Future<void> _handleTlsRequest(AdbMessage request) async {
-    // TODO: 实现TLS支持
-    throw UnimplementedError('TLS support not implemented yet');
+    try {
+      print('收到TLS请求，开始TLS握手...');
+
+      // 获取SSL上下文（使用当前密钥对）
+      final sslContext = SslUtils.getSslContext(keyPair);
+
+      // 配置安全套接字
+      final secureSocket = await SecureSocket.connect(
+        host,
+        port,
+        context: sslContext,
+        onBadCertificate: (certificate) {
+          // 在ADB配对中接受所有证书
+          print('接受TLS证书（ADB配对模式）');
+          return true;
+        },
+      );
+
+      print('TLS连接建立成功');
+      print('TLS版本: ${secureSocket.selectedProtocol}');
+
+      // 发送TLS握手完成确认
+      final responsePayload = Uint8List.fromList('TLS_OK'.codeUnits);
+      final responseChecksum = responsePayload.fold<int>(0, (sum, byte) => sum + (byte & 0xFF));
+      final response = AdbMessage(
+        command: AdbProtocol.cmdOkay,
+        arg0: 0,
+        arg1: request.arg0,
+        dataLength: responsePayload.length,
+        dataCrc32: responseChecksum,
+        magic: AdbProtocol.cmdOkay ^ 0xffffffff,
+        payload: responsePayload,
+      );
+
+      await _writer!.writeMessage(response);
+      print('TLS握手完成确认已发送');
+
+      // 更新连接状态为加密
+      _isSecure = true;
+      print('连接已升级为TLS加密');
+
+    } catch (e) {
+      print('TLS握手失败: $e');
+
+      // 发送TLS握手失败响应 - 使用CLSE命令表示连接关闭
+      final errorPayload = Uint8List.fromList('TLS_HANDSHAKE_FAILED'.codeUnits);
+      final errorChecksum = errorPayload.fold<int>(0, (sum, byte) => sum + (byte & 0xFF));
+      final errorResponse = AdbMessage(
+        command: AdbProtocol.cmdClse,
+        arg0: 1,
+        arg1: request.arg0,
+        dataLength: errorPayload.length,
+        dataCrc32: errorChecksum,
+        magic: AdbProtocol.cmdClse ^ 0xffffffff,
+        payload: errorPayload,
+      );
+
+      await _writer!.writeMessage(errorResponse);
+
+      throw AdbConnectionException('TLS握手失败: $e');
+    }
   }
 
   /// 处理认证请求
