@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'dart:math';
 import 'dart:convert';
 import 'package:pointycastle/pointycastle.dart' as pc;
+import 'package:pointycastle/asymmetric/rsa.dart';
 import 'package:convert/convert.dart';
 import 'package:basic_utils/basic_utils.dart';
 import 'package:asn1lib/asn1lib.dart';
@@ -24,51 +25,49 @@ class AdbKeyPair {
     required this.certificate,
   });
 
-  /// 使用私钥对数据进行签名（兼容Kadb实现）
+  /// 使用私钥对数据进行签名（完全对标Kadb：RSA/ECB/NoPadding + 固定填充）
   Uint8List signPayload(Uint8List data) {
     try {
-      print('DEBUG: 使用RSA签名算法（对标Kadb）');
+      print('DEBUG: 使用完全对标Kadb的RSA签名算法');
 
-      // 获取RSA密钥大小
-      final keySize = (privateKey.modulus!.bitLength + 7) ~/ 8;
-      print('DEBUG: RSA密钥大小: $keySize 字节');
+      // Kadb的固定签名填充（调整大小以适应RSA 2048位 = 256字节）
+      // 结构：0x00 0x01 [FF填充] 0x00 [固定尾部16字节]
+      // 总大小：256字节，其中token占20字节，填充需要236字节
+      const int rsaBlockSize = 256; // 2048位RSA
+      const int tokenSize = 20; // ADB token大小
+      const int fixedTailSize = 16; // 固定尾部大小
+      const int headerSize = 2; // 0x00, 0x01头部
+      const int separatorSize = 1; // 0x00分隔符
 
-      // 构建PKCS#1 v1.5 签名数据
-      // 注意: ADB使用的是特殊的"无加密"签名格式
-      // 格式: 0x00 | 0x01 | PS | 0x00 | DATA
-      final paddingLength = keySize - data.length - 3;
-      print('DEBUG: 需要填充长度: $paddingLength 字节');
+      final int ffPaddingSize = rsaBlockSize - tokenSize - headerSize - separatorSize - fixedTailSize; // 217字节FF填充
 
-      if (paddingLength < 8) {
-        throw Exception('填充长度不足: $paddingLength 字节');
-      }
+      final signaturePadding = Uint8List.fromList([
+        0x00, 0x01, // 头部
+        ...List.filled(ffPaddingSize, 0xFF), // FF填充
+        0x00, // 分隔符
+        0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14 // 固定尾部16字节
+      ]);
 
-      // 构建签名数据（注意：ADB期望的是原始填充数据，不是加密后的）
-      final signatureData = Uint8List(keySize);
-      signatureData[0] = 0x00;
-      signatureData[1] = 0x01;
+      print('DEBUG: 填充结构 - 头部:2字节, FF填充:$ffPaddingSize字节, 分隔符:1字节, 固定尾部:16字节, 总计:${signaturePadding.length}字节');
 
-      // 填充0xFF
-      for (int i = 2; i < 2 + paddingLength; i++) {
-        signatureData[i] = 0xFF;
-      }
+      // 构建待加密数据：填充 + 数据（对标Kadb的cipher.update + cipher.doFinal）
+      final paddedData = BytesBuilder();
+      paddedData.add(signaturePadding);
+      paddedData.add(data);
 
-      signatureData[2 + paddingLength] = 0x00; // 分隔符
+      final input = paddedData.toBytes();
+      print('DEBUG: 待签名数据长度: ${input.length} 字节');
 
-      // 复制数据
-      for (int i = 0; i < data.length; i++) {
-        signatureData[3 + paddingLength + i] = data[i];
-      }
+      // 创建RSA处理器（无填充模式）- 完全对标Kadb的RSA/ECB/NoPadding
+      final rsaEngine = RSAEngine();
+      final privateKeyParam = pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey);
+      rsaEngine.init(true, privateKeyParam); // 加密模式
 
-      print('DEBUG: 签名数据格式:');
-      print('  头部: 0x${signatureData[0].toRadixString(16).padLeft(2, '0')} 0x${signatureData[1].toRadixString(16).padLeft(2, '0')}');
-      print('  填充长度: $paddingLength');
-      print('  数据长度: ${data.length}');
-      print('  总长度: ${signatureData.length}');
+      // 使用RSA加密（无填充）生成签名 - 这是Kadb的核心算法！
+      final signature = rsaEngine.process(input);
 
-      // 重要: ADB期望的是原始填充数据，不是加密后的
-      // 设备会用它保存的公钥来验证这个签名
-      return signatureData;
+      print('DEBUG: 签名生成完成，长度: ${signature.length} 字节');
+      return signature;
     } catch (e) {
       throw Exception('RSA签名失败: $e');
     }
