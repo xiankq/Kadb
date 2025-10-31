@@ -6,7 +6,6 @@ import 'dart:typed_data';
 import 'dart:math';
 import 'dart:convert';
 import 'package:pointycastle/pointycastle.dart' as pc;
-import 'package:pointycastle/asymmetric/rsa.dart';
 import 'package:convert/convert.dart';
 import 'package:basic_utils/basic_utils.dart';
 import 'package:asn1lib/asn1lib.dart';
@@ -25,45 +24,51 @@ class AdbKeyPair {
     required this.certificate,
   });
 
-  /// 使用私钥对数据进行签名（兼容Kadb：RSA/ECB/NoPadding + 特殊填充）
+  /// 使用私钥对数据进行签名（兼容Kadb实现）
   Uint8List signPayload(Uint8List data) {
     try {
-      // Kadb使用RSA/ECB/NoPadding + 特殊签名填充
-      // 而不是SHA-256/RSA签名
-      print('DEBUG: 使用RSA/ECB/NoPadding签名算法（对标Kadb）');
+      print('DEBUG: 使用RSA签名算法（对标Kadb）');
 
-      // 创建RSA处理器（无填充模式）
-      final rsaEngine = RSAEngine();
-      final privateKeyParam = pc.PrivateKeyParameter<pc.RSAPrivateKey>(privateKey);
-      rsaEngine.init(true, privateKeyParam); // 加密模式用于签名
+      // 获取RSA密钥大小
+      final keySize = (privateKey.modulus!.bitLength + 7) ~/ 8;
+      print('DEBUG: RSA密钥大小: $keySize 字节');
 
-      // Kadb的签名填充（固定格式）
-      final signaturePadding = Uint8List.fromList([
-        0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
-        0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00,
-        0x04, 0x14
-      ]);
+      // 构建PKCS#1 v1.5 签名数据
+      // 注意: ADB使用的是特殊的"无加密"签名格式
+      // 格式: 0x00 | 0x01 | PS | 0x00 | DATA
+      final paddingLength = keySize - data.length - 3;
+      print('DEBUG: 需要填充长度: $paddingLength 字节');
 
-      // 构建待加密数据：填充 + 数据
-      final paddedData = BytesBuilder();
-      paddedData.add(signaturePadding);
-      paddedData.add(data);
+      if (paddingLength < 8) {
+        throw Exception('填充长度不足: $paddingLength 字节');
+      }
 
-      // 使用RSA加密（无填充）生成签名
-      final input = paddedData.toBytes();
-      final signature = rsaEngine.process(input);
+      // 构建签名数据（注意：ADB期望的是原始填充数据，不是加密后的）
+      final signatureData = Uint8List(keySize);
+      signatureData[0] = 0x00;
+      signatureData[1] = 0x01;
 
-      print('DEBUG: 签名生成完成，长度: ${signature.length} 字节');
-      return signature;
+      // 填充0xFF
+      for (int i = 2; i < 2 + paddingLength; i++) {
+        signatureData[i] = 0xFF;
+      }
+
+      signatureData[2 + paddingLength] = 0x00; // 分隔符
+
+      // 复制数据
+      for (int i = 0; i < data.length; i++) {
+        signatureData[3 + paddingLength + i] = data[i];
+      }
+
+      print('DEBUG: 签名数据格式:');
+      print('  头部: 0x${signatureData[0].toRadixString(16).padLeft(2, '0')} 0x${signatureData[1].toRadixString(16).padLeft(2, '0')}');
+      print('  填充长度: $paddingLength');
+      print('  数据长度: ${data.length}');
+      print('  总长度: ${signatureData.length}');
+
+      // 重要: ADB期望的是原始填充数据，不是加密后的
+      // 设备会用它保存的公钥来验证这个签名
+      return signatureData;
     } catch (e) {
       throw Exception('RSA签名失败: $e');
     }

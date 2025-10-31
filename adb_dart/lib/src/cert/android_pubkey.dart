@@ -46,8 +46,13 @@ class AndroidPubkey {
     print('DEBUG AndroidPubkey: nWords长度: ${nWords.length}, rrWords长度: ${rrWords.length}');
 
     // 构建输出缓冲区 - 精确大小
-    final buffer = ByteData(keyLengthWords * 4 * 2 + 8); // nWords + rrWords + len + n0inv + exponent
+    // 大小 = len(4) + n0inv(4) + nWords(64*4) + rrWords(64*4) + exponent(4) = 524字节
+    final bufferSize = 4 + 4 + (keyLengthWords * 4) + (keyLengthWords * 4) + 4;
+    final buffer = ByteData(bufferSize);
     var offset = 0;
+
+    print('DEBUG AndroidPubkey: 缓冲区大小: $bufferSize 字节');
+    print('DEBUG AndroidPubkey: keyLengthWords: $keyLengthWords');
 
     // len
     buffer.setUint32(offset, keyLengthWords, Endian.little);
@@ -60,18 +65,33 @@ class AndroidPubkey {
     offset += 4;
 
     // n[]
-    for (final word in nWords) {
-      buffer.setUint32(offset, word & 0xFFFFFFFF, Endian.little);
+    print('DEBUG AndroidPubkey: 写入nWords, offset: $offset');
+    for (int i = 0; i < nWords.length; i++) {
+      if (offset + 4 > bufferSize) {
+        print('DEBUG AndroidPubkey: 错误! 超出缓冲区: offset=$offset, bufferSize=$bufferSize, i=$i');
+        throw RangeError('Buffer overflow at offset $offset, i=$i');
+      }
+      buffer.setUint32(offset, nWords[i] & 0xFFFFFFFF, Endian.little);
       offset += 4;
     }
 
     // rr[]
-    for (final word in rrWords) {
-      buffer.setUint32(offset, word & 0xFFFFFFFF, Endian.little);
+    print('DEBUG AndroidPubkey: 写入rrWords, offset: $offset');
+    for (int i = 0; i < rrWords.length; i++) {
+      if (offset + 4 > bufferSize) {
+        print('DEBUG AndroidPubkey: 错误! 超出缓冲区: offset=$offset, bufferSize=$bufferSize, i=$i');
+        throw RangeError('Buffer overflow at offset $offset, i=$i');
+      }
+      buffer.setUint32(offset, rrWords[i] & 0xFFFFFFFF, Endian.little);
       offset += 4;
     }
 
-    // exponent - 使用setUint32而不是setInt32避免符号问题
+    // exponent
+    print('DEBUG AndroidPubkey: 写入exponent, offset: $offset');
+    if (offset + 4 > bufferSize) {
+      print('DEBUG AndroidPubkey: 错误! 超出缓冲区: offset=$offset, bufferSize=$bufferSize');
+      throw RangeError('Buffer overflow at offset $offset');
+    }
     buffer.setUint32(offset, e.toInt(), Endian.little);
     offset += 4;
 

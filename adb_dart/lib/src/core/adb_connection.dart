@@ -15,6 +15,7 @@ import '../cert/adb_key_pair.dart';
 import '../queue/adb_message_queue.dart';
 import '../stream/adb_stream.dart';
 import '../tls/ssl_utils.dart';
+import '../cert/android_pubkey.dart';
 
 /// ADB连接状态
 enum AdbConnectionState {
@@ -113,8 +114,10 @@ class AdbConnection {
     while (true) {
       responseCount++;
       print('等待响应 #$responseCount...');
+      print('DEBUG: 当前连接状态: $_state');
 
       try {
+        print('DEBUG: 准备读取消息...');
         final response = await _reader!.readMessage().timeout(
           Duration(seconds: 30), // 增加超时时间到30秒
           onTimeout: () {
@@ -150,6 +153,8 @@ class AdbConnection {
             throw AdbProtocolException(
                 'Unexpected message during connection: ${AdbProtocol.getCommandName(response.command)}');
         }
+
+        print('DEBUG: 响应处理完成，继续循环...');
       } catch (e) {
         print('消息循环错误: $e');
         rethrow;
@@ -271,6 +276,14 @@ class AdbConnection {
         try {
           final publicKey = keyPair.getAdbPublicKey();
           print('DEBUG: 公钥长度: ${publicKey.length} 字节');
+          print('DEBUG: 公钥格式验证...');
+
+          // 验证公钥格式
+          final isValidFormat = AndroidPubkey.verifyPublicKeyFormat(publicKey);
+          print('DEBUG: 公钥格式验证结果: $isValidFormat');
+
+          // 打印公钥的前几个字节用于调试
+          print('DEBUG: 公钥前16字节 (十六进制): ${publicKey.take(16).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
 
           // 检查公钥长度是否合理
           if (publicKey.length > 1000) {
@@ -285,16 +298,30 @@ class AdbConnection {
         }
 
         // 等待最终连接确认
+        print('等待最终连接确认（15秒超时）...');
         final finalResponse = await _reader!.readMessage().timeout(
           Duration(seconds: 15),
           onTimeout: () {
-            throw TimeoutException('等待最终连接确认超时');
+            print('⏰ 等待最终连接确认超时 - 设备可能在处理公钥');
+            throw TimeoutException('等待最终连接确认超时 - 设备可能需要手动授权');
           },
         );
+
+        print('DEBUG: 收到最终响应 - 命令: ${finalResponse.command} (${finalResponse.command.toRadixString(16)})');
+        print('收到最终响应: ${AdbProtocol.getCommandName(finalResponse.command)}');
 
         if (finalResponse.command == AdbProtocol.cmdCnxn) {
           print('✅ 公钥认证成功，连接已建立！');
           await _handleConnectionConfirmation(finalResponse);
+        } else if (finalResponse.command == AdbProtocol.cmdAuth) {
+          // 设备可能需要其他认证方式
+          print('⚠️  设备返回AUTH响应，可能需要其他认证方式');
+          print('  认证类型: ${finalResponse.arg0}');
+          if (finalResponse.payload != null) {
+            final payloadStr = String.fromCharCodes(finalResponse.payload!);
+            print('  载荷信息: $payloadStr');
+          }
+          throw AdbAuthException('设备拒绝公钥认证，可能需要手动授权或ADB调试未开启');
         } else {
           throw AdbAuthException('认证失败，收到意外响应: ${AdbProtocol.getCommandName(finalResponse.command)}');
         }
