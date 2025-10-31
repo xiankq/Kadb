@@ -9,7 +9,7 @@ void main() async {
 
   // 创建ADB客户端实例
   final adb = AdbDart(
-    host: '192.168.2.94',
+    host: '192.168.2.148',
     port: 5555,
   );
 
@@ -58,73 +58,5 @@ void main() async {
     // 断开连接
     await adb.disconnect();
     print('✓ 连接已断开');
-  }
-}
-
-/// 另一个示例：交互式Shell
-Future<void> interactiveShellExample() async {
-  print('\n=== 交互式Shell示例 ===');
-
-  final adb = AdbDart();
-
-  try {
-    await adb.connect();
-    print('已连接到设备');
-
-    // 打开交互式Shell
-    final shellStream = await adb.openShell();
-    print('已打开交互式Shell');
-
-    // 发送命令
-    await shellStream.writeString('ls /system/bin | head -5\n');
-    final result = await shellStream.readString();
-    print('系统bin目录前5个文件:');
-    print(result);
-
-    // 发送更多命令
-    await shellStream.writeString('pwd\n');
-    final pwd = await shellStream.readString();
-    print('当前目录: $pwd');
-
-    await shellStream.close();
-  } catch (e) {
-    print('交互式Shell错误: $e');
-  } finally {
-    await adb.disconnect();
-  }
-}
-
-/// 设备管理示例
-Future<void> deviceManagementExample() async {
-  print('\n=== 设备管理示例 ===');
-
-  final adb = AdbDart();
-
-  try {
-    await adb.connect();
-
-    // 获取详细设备信息
-    final info = await adb.getDeviceInfo();
-    print('设备详细信息:');
-    print(info);
-
-    // 获取电池信息
-    print('\n电池信息:');
-    final batteryInfo = await adb.shell('dumpsys battery');
-    print(batteryInfo);
-
-    // 获取内存信息
-    print('\n内存信息:');
-    final memInfo = await adb.shell('cat /proc/meminfo');
-    print(memInfo);
-
-    // 获取CPU信息
-    print('\nCPU信息:');
-    final cpuInfo = await adb.shell('cat /proc/cpuinfo');
-    print(cpuInfo);
-  } catch (e) {
-    print('设备管理错误: $e');
-  } finally {
-    await adb.disconnect();
   }
 }
