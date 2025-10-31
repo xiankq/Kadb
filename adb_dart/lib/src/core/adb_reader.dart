@@ -87,9 +87,15 @@ class AdbReader {
       print('DEBUG: 载荷读取完成，长度: ${payload.length}');
 
       // 验证校验和（Kadb使用简单校验和，非CRC32）
-      if (!fullMessage.verifyChecksum()) {
+      print('DEBUG: 开始校验和验证...');
+      final isValidChecksum = fullMessage.verifyChecksum();
+      print('DEBUG: 校验和验证结果: $isValidChecksum');
+      if (!isValidChecksum) {
+        print('DEBUG: 校验和验证失败！dataCrc32=${fullMessage.dataCrc32}');
         throw AdbProtocolException('Checksum verification failed');
       }
+
+      print('DEBUG: 消息验证通过，准备返回消息');
 
       // 从缓冲区中移除已处理的数据
       _buffer.clear();
@@ -102,12 +108,25 @@ class AdbReader {
       return fullMessage;
     } else {
       print('DEBUG: 无载荷');
+
+      // 验证校验和（对于无载荷消息）
+      print('DEBUG: 开始校验和验证（无载荷）...');
+      final isValidChecksum = message.verifyChecksum();
+      print('DEBUG: 校验和验证结果（无载荷）: $isValidChecksum');
+      if (!isValidChecksum) {
+        print('DEBUG: 校验和验证失败（无载荷）！dataCrc32=${message.dataCrc32}');
+        throw AdbProtocolException('Checksum verification failed');
+      }
+
+      print('DEBUG: 消息验证通过（无载荷），准备返回消息');
+
       // 没有数据载荷，直接移除头部
       _buffer.clear();
       if (headerData.length > AdbProtocol.adbMessageHeaderSize) {
         _buffer.add(headerData.sublist(AdbProtocol.adbMessageHeaderSize));
       }
 
+      print('DEBUG: readMessage() 方法即将返回（无载荷）');
       return message;
     }
   }

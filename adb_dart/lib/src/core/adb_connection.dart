@@ -44,6 +44,7 @@ class AdbConnection {
   int _maxPayloadSize = 0;
   Set<String> _supportedFeatures = {};
   final Random _random = Random();
+  bool _hasAttemptedSignatureAuth = false; // 追踪是否已经尝试过签名认证
 
   AdbConnection({
     required this.host,
@@ -125,9 +126,13 @@ class AdbConnection {
             throw TimeoutException('等待数据超时 - 设备可能无响应', Duration(seconds: 30));
           },
         );
+        print('📨 DEBUG: 消息读取成功！命令=${response.command} (${AdbProtocol.getCommandName(response.command)})');
+        print('📨 DEBUG: 命令码十六进制: 0x${response.command.toRadixString(16)}');
+        print('📨 DEBUG: 与cmdAuth比较: ${response.command == AdbProtocol.cmdAuth}');
         print(
             '收到响应: ${AdbProtocol.getCommandName(response.command)} (arg0=${response.arg0}, arg1=${response.arg1})');
 
+        print('📨 DEBUG: 即将进入switch语句，命令=${response.command}');
         switch (response.command) {
           case AdbProtocol.cmdStls:
             // TLS加密请求
@@ -137,11 +142,17 @@ class AdbConnection {
 
           case AdbProtocol.cmdAuth:
             // 认证请求
-            print('DEBUG: 进入认证处理分支 - cmdAuth=${response.command}');
-            print('收到认证请求');
-            await _handleAuthRequest(response);
-            // 认证后需要继续等待响应（可能是CNXN或另一个AUTH）
-            print('DEBUG: 认证处理完成，继续等待下一个响应');
+            print('🔐 DEBUG: 进入认证处理分支 - cmdAuth=${response.command}');
+            print('📋 DEBUG: AUTH消息详情 - arg0=${response.arg0}, payload长度=${response.payload?.length ?? 0}');
+            print('📋 DEBUG: AUTH载荷数据: ${response.payload?.take(8).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}...');
+            try {
+              await _handleAuthRequest(response);
+              print('✅ DEBUG: 认证处理完成，继续等待下一个响应');
+            } catch (e, stackTrace) {
+              print('❌ DEBUG: 认证处理失败: $e');
+              print('📋 DEBUG: 错误堆栈: $stackTrace');
+              rethrow;
+            }
             break;
 
           case AdbProtocol.cmdCnxn:
@@ -156,8 +167,9 @@ class AdbConnection {
         }
 
         print('DEBUG: 响应处理完成，继续循环...');
-      } catch (e) {
-        print('消息循环错误: $e');
+      } catch (e, stackTrace) {
+        print('❌ 消息循环错误: $e');
+        print('📋 错误堆栈: $stackTrace');
         rethrow;
       }
     }
@@ -227,112 +239,51 @@ class AdbConnection {
     }
   }
 
-  /// 处理认证请求
+  /// 处理认证请求（Kadb兼容版本 - 连续读取模式）
   Future<void> _handleAuthRequest(AdbMessage request) async {
     _state = AdbConnectionState.authenticating;
     print(
-        '收到认证请求: authType=${request.arg0}, payload长度=${request.payload?.length ?? 0}');
+        '🔐 开始Kadb兼容认证处理: authType=${request.arg0}, payload长度=${request.payload?.length ?? 0}');
 
     if (request.arg0 == AdbProtocol.authTypeToken) {
-      print('DEBUG: 开始标准ADB认证流程（对标Kadb实现）');
+      print('📋 DEBUG: 开始Kadb兼容的ADB认证流程（连续读取模式）');
+      print('📋 DEBUG: 收到的TOKEN数据: ${request.payload?.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
 
       // Kadb的认证策略：首先尝试签名认证，如果失败再发送公钥
-      print('首先尝试签名认证...');
-
-      // 使用私钥对token进行签名
-      final signature = keyPair.signPayload(request.payload!);
-      print('生成RSA签名: ${signature.length} 字节');
-
-      // 发送签名
-      await _writer!.writeAuth(AdbProtocol.authTypeSignature, signature);
-      print('签名已发送，等待设备响应...');
-
-      // 读取设备响应
-      print('DEBUG: 等待设备对签名的响应...');
-      final deviceResponse = await _reader!.readMessage().timeout(
-        Duration(seconds: 30), // 增加到30秒
-        onTimeout: () {
-          throw TimeoutException('等待设备签名响应超时');
-        },
-      );
-
-      print(
-          'DEBUG: 收到设备响应，命令:${AdbProtocol.getCommandName(deviceResponse.command)}');
-      print(
-          '收到设备对签名的响应: ${AdbProtocol.getCommandName(deviceResponse.command)}');
-
-      if (deviceResponse.command == AdbProtocol.cmdCnxn) {
-        // 签名认证成功！
-        print('✅ 签名认证成功，连接已建立！');
-        await _handleConnectionConfirmation(deviceResponse);
-        return;
-      }
-
-      if (deviceResponse.command == AdbProtocol.cmdAuth) {
-        // 签名认证失败，设备不认识这个密钥，需要提供公钥
-        print('签名认证失败，设备需要公钥认证');
-        print('发送RSA公钥进行认证...');
-
-        try {
-          final publicKey = keyPair.getAdbPublicKey();
-          print('DEBUG: 公钥长度: ${publicKey.length} 字节');
-          print('DEBUG: 公钥格式验证...');
-
-          // 验证公钥格式
-          final isValidFormat = AndroidPubkey.verifyPublicKeyFormat(publicKey);
-          print('DEBUG: 公钥格式验证结果: $isValidFormat');
-
-          // 打印公钥的前几个字节用于调试
-          print(
-              'DEBUG: 公钥前16字节 (十六进制): ${publicKey.take(16).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
-
-          // 检查公钥长度是否合理
-          if (publicKey.length > 1000) {
-            throw AdbAuthException('公钥长度异常: ${publicKey.length} 字节');
-          }
-
-          await _writer!.writeAuth(AdbProtocol.authTypeRsaPublic, publicKey);
-          print('RSA公钥已发送，等待设备响应...');
-        } catch (e) {
-          print('DEBUG: 公钥发送失败: $e');
-          rethrow;
-        }
-
-        // 等待最终连接确认
-        print('等待最终连接确认（15秒超时）...');
-        final finalResponse = await _reader!.readMessage().timeout(
-          Duration(seconds: 15),
-          onTimeout: () {
-            print('⏰ 等待最终连接确认超时 - 设备可能在处理公钥');
-            throw TimeoutException('等待最终连接确认超时 - 设备可能需要手动授权');
-          },
-        );
-
-        print('收到最终响应: ${AdbProtocol.getCommandName(finalResponse.command)}');
-
-        if (finalResponse.command == AdbProtocol.cmdCnxn) {
-          print('✅ 公钥认证成功，连接已建立！');
-          await _handleConnectionConfirmation(finalResponse);
-        } else if (finalResponse.command == AdbProtocol.cmdAuth) {
-          // 设备可能需要其他认证方式
-          print('⚠️  设备返回AUTH响应，可能需要其他认证方式');
-          print('  认证类型: ${finalResponse.arg0}');
-          if (finalResponse.payload != null) {
-            final payloadStr = String.fromCharCodes(finalResponse.payload!);
-            print('  载荷信息: $payloadStr');
-          }
-          throw AdbAuthException('设备拒绝公钥认证，可能需要手动授权或ADB调试未开启');
-        } else {
-          throw AdbAuthException(
-              '认证失败，收到意外响应: ${AdbProtocol.getCommandName(finalResponse.command)}');
-        }
+      if (_hasAttemptedSignatureAuth) {
+        print('🔑 已经尝试过签名认证，现在尝试公钥认证...');
+        final publicKey = keyPair.getAdbPublicKey();
+        await _writer!.writeAuth(AdbProtocol.authTypeRsaPublic, publicKey);
+        print('✅ 公钥已发送');
       } else {
-        throw AdbAuthException(
-            '签名认证收到意外响应: ${AdbProtocol.getCommandName(deviceResponse.command)}');
+        print('🔑 首先尝试签名认证...');
+        // 使用私钥对token进行签名（使用新的Kadb兼容算法）
+        final signature = keyPair.signPayload(request.payload!);
+        print('✅ 生成RSA签名: ${signature.length} 字节');
+        print('📝 DEBUG: 签名前16字节: ${signature.take(16).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
+
+        // 发送签名
+        print('📤 发送签名认证消息...');
+        await _writer!.writeAuth(AdbProtocol.authTypeSignature, signature);
+        print('✅ 签名已发送，让外部循环处理设备响应（对标Kadb连续读取模式）');
+        _hasAttemptedSignatureAuth = true; // 标记已经尝试过签名认证
       }
-    } else {
-      throw AdbAuthException('不支持的认证类型: ${request.arg0}');
+
+      // 不直接读取响应，让外部循环处理
+      _state = AdbConnectionState.authenticating; // 保持认证状态
+      return;
     }
+
+    if (request.arg0 == AdbProtocol.authTypeSignature) {
+      // 设备返回签名认证响应，通常表示认证失败，尝试公钥认证
+      print('⚠️  签名认证响应，尝试公钥认证...');
+      final publicKey = keyPair.getAdbPublicKey();
+      await _writer!.writeAuth(AdbProtocol.authTypeRsaPublic, publicKey);
+      print('✅ 公钥已发送');
+      return;
+    }
+
+    print('⚠️  未知认证类型: ${request.arg0}');
   }
 
   /// 处理连接确认
