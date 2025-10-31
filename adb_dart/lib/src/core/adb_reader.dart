@@ -44,7 +44,7 @@ class AdbReader {
     final message = AdbMessage.fromHeader(header);
 
     print(
-        'DEBUG: 解析头部 - 命令: ${message.command.toRadixString(16)}, 数据长度: ${message.dataLength}');
+        'DEBUG: 解析头部 - 命令: ${AdbProtocol.getCommandName(message.command)}, 数据长度: ${message.dataLength}');
 
     // 验证消息
     if (!message.isValid()) {

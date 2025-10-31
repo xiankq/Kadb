@@ -5,18 +5,6 @@ library;
 import 'dart:typed_data';
 import 'adb_protocol.dart';
 
-/// ADB消息头部大小（24字节）
-const int adbMessageHeaderSize = 24;
-
-/// ADB当前版本
-const int adbVersion = 0x01000000;
-
-/// 最大数据载荷大小
-const int adbMaxPayload = 256 * 1024;
-
-/// 旧版本最大数据载荷大小（用于兼容性）
-const int adbMaxPayloadLegacy = 4096;
-
 /// ADB消息类，表示一个完整的ADB消息
 class AdbMessage {
   final int command;
@@ -39,9 +27,9 @@ class AdbMessage {
 
   /// 从字节数组解析消息头部
   factory AdbMessage.fromHeader(Uint8List header) {
-    if (header.length != adbMessageHeaderSize) {
+    if (header.length != AdbProtocol.adbMessageHeaderSize) {
       throw ArgumentError(
-          'Invalid header size: ${header.length}, expected: $adbMessageHeaderSize');
+          'Invalid header size: ${header.length}, expected: $AdbProtocol.adbMessageHeaderSize');
     }
 
     // 边界检查：确保header足够长
@@ -68,9 +56,10 @@ class AdbMessage {
 
   /// 序列化消息头部到字节数组
   Uint8List serializeHeader() {
-    print('DEBUG: 序列化头部 - 命令: $command (${command.toRadixString(16)}), arg0: $arg0, arg1: $arg1, dataLength: $dataLength, dataCrc32: $dataCrc32, magic: $magic');
+    print(
+        'DEBUG: 序列化头部 - 命令: ${AdbProtocol.getCommandName(command)}, arg0: $arg0, arg1: $arg1, dataLength: $dataLength, dataCrc32: $dataCrc32, magic: $magic');
 
-    final buffer = Uint8List(adbMessageHeaderSize);
+    final buffer = Uint8List(AdbProtocol.adbMessageHeaderSize);
 
     // 边界检查：确保所有值都在有效范围内
     if (command < 0 || command > 0xFFFFFFFF) {

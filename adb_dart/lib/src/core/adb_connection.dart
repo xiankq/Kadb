@@ -125,7 +125,8 @@ class AdbConnection {
             throw TimeoutException('等待数据超时 - 设备可能无响应', Duration(seconds: 30));
           },
         );
-        print('收到响应: ${AdbProtocol.getCommandName(response.command)} (arg0=${response.arg0}, arg1=${response.arg1})');
+        print(
+            '收到响应: ${AdbProtocol.getCommandName(response.command)} (arg0=${response.arg0}, arg1=${response.arg1})');
 
         switch (response.command) {
           case AdbProtocol.cmdStls:
@@ -187,7 +188,8 @@ class AdbConnection {
 
       // 发送TLS握手完成确认
       final responsePayload = Uint8List.fromList('TLS_OK'.codeUnits);
-      final responseChecksum = responsePayload.fold<int>(0, (sum, byte) => sum + (byte & 0xFF));
+      final responseChecksum =
+          responsePayload.fold<int>(0, (sum, byte) => sum + (byte & 0xFF));
       final response = AdbMessage(
         command: AdbProtocol.cmdOkay,
         arg0: 0,
@@ -202,13 +204,13 @@ class AdbConnection {
       print('TLS握手完成确认已发送');
 
       print('连接已升级为TLS加密');
-
     } catch (e) {
       print('TLS握手失败: $e');
 
       // 发送TLS握手失败响应 - 使用CLSE命令表示连接关闭
       final errorPayload = Uint8List.fromList('TLS_HANDSHAKE_FAILED'.codeUnits);
-      final errorChecksum = errorPayload.fold<int>(0, (sum, byte) => sum + (byte & 0xFF));
+      final errorChecksum =
+          errorPayload.fold<int>(0, (sum, byte) => sum + (byte & 0xFF));
       final errorResponse = AdbMessage(
         command: AdbProtocol.cmdClse,
         arg0: 1,
@@ -228,7 +230,8 @@ class AdbConnection {
   /// 处理认证请求
   Future<void> _handleAuthRequest(AdbMessage request) async {
     _state = AdbConnectionState.authenticating;
-    print('收到认证请求: authType=${request.arg0}, payload长度=${request.payload?.length ?? 0}');
+    print(
+        '收到认证请求: authType=${request.arg0}, payload长度=${request.payload?.length ?? 0}');
 
     if (request.arg0 == AdbProtocol.authTypeToken) {
       print('DEBUG: 开始标准ADB认证流程（对标Kadb实现）');
@@ -253,13 +256,10 @@ class AdbConnection {
         },
       );
 
-      print('DEBUG: 收到设备响应，命令: ${deviceResponse.command} (${deviceResponse.command.toRadixString(16)})');
-      print('收到设备对签名的响应: ${AdbProtocol.getCommandName(deviceResponse.command)}');
-
-      // 调试：检查响应类型
-      print('DEBUG: 响应命令值: ${deviceResponse.command}');
-      print('DEBUG: CNXN命令值: ${AdbProtocol.cmdCnxn}');
-      print('DEBUG: AUTH命令值: ${AdbProtocol.cmdAuth}');
+      print(
+          'DEBUG: 收到设备响应，命令:${AdbProtocol.getCommandName(deviceResponse.command)}');
+      print(
+          '收到设备对签名的响应: ${AdbProtocol.getCommandName(deviceResponse.command)}');
 
       if (deviceResponse.command == AdbProtocol.cmdCnxn) {
         // 签名认证成功！
@@ -283,7 +283,8 @@ class AdbConnection {
           print('DEBUG: 公钥格式验证结果: $isValidFormat');
 
           // 打印公钥的前几个字节用于调试
-          print('DEBUG: 公钥前16字节 (十六进制): ${publicKey.take(16).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
+          print(
+              'DEBUG: 公钥前16字节 (十六进制): ${publicKey.take(16).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
 
           // 检查公钥长度是否合理
           if (publicKey.length > 1000) {
@@ -307,7 +308,6 @@ class AdbConnection {
           },
         );
 
-        print('DEBUG: 收到最终响应 - 命令: ${finalResponse.command} (${finalResponse.command.toRadixString(16)})');
         print('收到最终响应: ${AdbProtocol.getCommandName(finalResponse.command)}');
 
         if (finalResponse.command == AdbProtocol.cmdCnxn) {
@@ -323,10 +323,12 @@ class AdbConnection {
           }
           throw AdbAuthException('设备拒绝公钥认证，可能需要手动授权或ADB调试未开启');
         } else {
-          throw AdbAuthException('认证失败，收到意外响应: ${AdbProtocol.getCommandName(finalResponse.command)}');
+          throw AdbAuthException(
+              '认证失败，收到意外响应: ${AdbProtocol.getCommandName(finalResponse.command)}');
         }
       } else {
-        throw AdbAuthException('签名认证收到意外响应: ${AdbProtocol.getCommandName(deviceResponse.command)}');
+        throw AdbAuthException(
+            '签名认证收到意外响应: ${AdbProtocol.getCommandName(deviceResponse.command)}');
       }
     } else {
       throw AdbAuthException('不支持的认证类型: ${request.arg0}');
