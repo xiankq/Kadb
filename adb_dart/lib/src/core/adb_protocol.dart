@@ -2,20 +2,20 @@
 /// 基于Android ADB协议规范
 library adb_protocol;
 
-/// ADB消息头部大小（24字节）
-const int adbMessageHeaderSize = 24;
-
-/// ADB当前版本
-const int adbVersion = 0x01000000;
-
-/// 最大数据载荷大小
-const int adbMaxPayload = 256 * 1024;
-
-/// 旧版本最大数据载荷大小（用于兼容性）
-const int adbMaxPayloadLegacy = 4096;
-
 /// ADB命令常量
 class AdbProtocol {
+  /// ADB消息头部大小（24字节）
+  static const int adbMessageHeaderSize = 24;
+
+  /// ADB当前版本
+  static const int adbVersion = 0x01000000;
+
+  /// 最大数据载荷大小
+  static const int adbMaxPayload = 256 * 1024;
+
+  /// 旧版本最大数据载荷大小（用于兼容性）
+  static const int adbMaxPayloadLegacy = 4096;
+
   // 核心命令
   static const int cmdSync = 0x434e5953; // 'SYNC'
   static const int cmdCnxn = 0x4e584e43; // 'CNXN'
@@ -48,27 +48,28 @@ class AdbProtocol {
     'shell_v2',
   };
 
-  /// 获取命令名称（用于调试）
+  /// 获取命令名称
   static String getCommandName(int command) {
+    final raw = '0x${command.toRadixString(16).padLeft(8, '0')}';
     switch (command) {
       case cmdSync:
-        return 'SYNC';
+        return 'SYNC ($raw)';
       case cmdCnxn:
-        return 'CNXN';
+        return 'CNXN ($raw)';
       case cmdAuth:
-        return 'AUTH';
+        return 'AUTH ($raw)';
       case cmdOpen:
-        return 'OPEN';
+        return 'OPEN ($raw)';
       case cmdOkay:
-        return 'OKAY';
+        return 'OKAY ($raw)';
       case cmdClse:
-        return 'CLSE';
+        return 'CLSE ($raw)';
       case cmdWrte:
-        return 'WRTE';
+        return 'WRTE ($raw)';
       case cmdStls:
-        return 'STLS';
+        return 'STLS ($raw)';
       default:
-        return 'UNKNOWN(0x${command.toRadixString(16).padLeft(8, '0')})';
+        return 'UNKNOWN ($raw)';
     }
   }
 }

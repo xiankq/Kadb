@@ -18,7 +18,8 @@ class AdbWriter {
   /// 写入消息
   Future<void> writeMessage(AdbMessage message) async {
     try {
-      print('DEBUG: 写入消息 - 命令: ${message.command} (${message.command.toRadixString(16)}), 载荷长度: ${message.payload?.length ?? 0}');
+      print(
+          'DEBUG: 写入消息 - 命令: ${message.command} (${message.command.toRadixString(16)}), 载荷长度: ${message.payload?.length ?? 0}');
 
       // 发送消息头部
       final header = message.serializeHeader();
@@ -44,8 +45,8 @@ class AdbWriter {
   /// 写入CONNECT消息
   Future<void> writeConnect() async {
     final message = AdbMessage.connect(
-      adbVersion,
-      adbMaxPayload,
+      AdbProtocol.adbVersion,
+      AdbProtocol.adbMaxPayload,
       'host::${getDefaultDeviceName()}\u0000',
     );
     await writeMessage(message);

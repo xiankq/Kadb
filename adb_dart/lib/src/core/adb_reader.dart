@@ -5,7 +5,7 @@ library adb_reader;
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
-import 'adb_message.dart' hide adbMessageHeaderSize;
+import 'adb_message.dart';
 import 'adb_protocol.dart';
 import '../exception/adb_exceptions.dart';
 
@@ -27,7 +27,7 @@ class AdbReader {
     print('DEBUG: 开始读取消息，当前缓冲区长度: ${_buffer.length}');
 
     // 等待完整的头部
-    while (_buffer.length < adbMessageHeaderSize) {
+    while (_buffer.length < AdbProtocol.adbMessageHeaderSize) {
       await _waitForData();
     }
 
@@ -35,14 +35,16 @@ class AdbReader {
     final headerData = _buffer.toBytes();
     print('DEBUG: 头部数据长度: ${headerData.length}');
 
-    if (headerData.length < adbMessageHeaderSize) {
-      throw AdbProtocolException('Insufficient data for header: ${headerData.length} < $adbMessageHeaderSize');
+    if (headerData.length < AdbProtocol.adbMessageHeaderSize) {
+      throw AdbProtocolException(
+          'Insufficient data for header: ${headerData.length} < $AdbProtocol.adbMessageHeaderSize');
     }
 
-    final header = headerData.sublist(0, adbMessageHeaderSize);
+    final header = headerData.sublist(0, AdbProtocol.adbMessageHeaderSize);
     final message = AdbMessage.fromHeader(header);
 
-    print('DEBUG: 解析头部 - 命令: ${message.command.toRadixString(16)}, 数据长度: ${message.dataLength}');
+    print(
+        'DEBUG: 解析头部 - 命令: ${message.command.toRadixString(16)}, 数据长度: ${message.dataLength}');
 
     // 验证消息
     if (!message.isValid()) {
@@ -52,7 +54,8 @@ class AdbReader {
     // 如果有数据载荷，继续读取
     if (message.dataLength > 0) {
       print('DEBUG: 有载荷，需要读取 ${message.dataLength} 字节');
-      while (_buffer.length < adbMessageHeaderSize + message.dataLength) {
+      while (_buffer.length <
+          AdbProtocol.adbMessageHeaderSize + message.dataLength) {
         await _waitForData();
       }
 
@@ -61,14 +64,14 @@ class AdbReader {
       print('DEBUG: 总数据长度: ${allData.length}, 需要载荷长度: ${message.dataLength}');
 
       // 边界检查：确保数据足够
-      if (allData.length < adbMessageHeaderSize + message.dataLength) {
+      if (allData.length <
+          AdbProtocol.adbMessageHeaderSize + message.dataLength) {
         throw AdbProtocolException(
-          'Insufficient data for payload: expected ${adbMessageHeaderSize + message.dataLength}, got ${allData.length}'
-        );
+            'Insufficient data for payload: expected ${AdbProtocol.adbMessageHeaderSize + message.dataLength}, got ${allData.length}');
       }
 
-      final payload = allData.sublist(
-          adbMessageHeaderSize, adbMessageHeaderSize + message.dataLength);
+      final payload = allData.sublist(AdbProtocol.adbMessageHeaderSize,
+          AdbProtocol.adbMessageHeaderSize + message.dataLength);
 
       // 重新创建包含载荷的消息
       final fullMessage = AdbMessage(
@@ -90,8 +93,10 @@ class AdbReader {
 
       // 从缓冲区中移除已处理的数据
       _buffer.clear();
-      if (allData.length > adbMessageHeaderSize + message.dataLength) {
-        _buffer.add(allData.sublist(adbMessageHeaderSize + message.dataLength));
+      if (allData.length >
+          AdbProtocol.adbMessageHeaderSize + message.dataLength) {
+        _buffer.add(allData
+            .sublist(AdbProtocol.adbMessageHeaderSize + message.dataLength));
       }
 
       return fullMessage;
@@ -99,8 +104,8 @@ class AdbReader {
       print('DEBUG: 无载荷');
       // 没有数据载荷，直接移除头部
       _buffer.clear();
-      if (headerData.length > adbMessageHeaderSize) {
-        _buffer.add(headerData.sublist(adbMessageHeaderSize));
+      if (headerData.length > AdbProtocol.adbMessageHeaderSize) {
+        _buffer.add(headerData.sublist(AdbProtocol.adbMessageHeaderSize));
       }
 
       return message;
@@ -123,7 +128,7 @@ class AdbReader {
         return;
       }
 
-      if (_buffer.length >= adbMessageHeaderSize) {
+      if (_buffer.length >= AdbProtocol.adbMessageHeaderSize) {
         // 数据已足够
         return;
       }
